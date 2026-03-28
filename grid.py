@@ -213,7 +213,7 @@ def visualize_grid_mapping(
     style = _CHANNEL_STYLE[channel_name]
     h, w = channel_array.shape
     grid_info = get_grid_info(sparse_grid, scale_factor)
-
+ 
     # --- Tile the small grid to a viewable size (max 12×12 pixels shown) ---
     tile_rows = min(h, 12)
     tile_cols = min(w, 12)
