@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Image Decoding Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07080f;--bg2:#0d0f1a;--bg3:#111526;
+  --border:#1e2340;--border-glow:#2a3060;
+  --text:#e0e4ff;--text2:#8890b8;
+  --accent:#6c8bff;--accent2:#a259ff;
+  --cyan:#00e5ff;--green:#39ff8a;--red:#ff4d6a;--gold:#ffd166;
+  --glass:rgba(255,255,255,0.04);--glass-border:rgba(255,255,255,0.08);
+  --radius:14px;--radius-sm:8px;
+  --mono:'JetBrains Mono',monospace;--sans:'Outfit',sans-serif;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);overflow-x:hidden}
+body{display:flex;flex-direction:column;min-height:100vh}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:var(--border-glow);border-radius:3px}
+
+header{padding:20px 32px;display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,rgba(108,139,255,.08),rgba(162,89,255,.05),transparent);backdrop-filter:blur(10px);position:sticky;top:0;z-index:100}
+.logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:18px;filter:drop-shadow(0 0 12px var(--accent))}
+header h1{font-size:1.25rem;font-weight:600;letter-spacing:.02em}
+header p{font-size:.75rem;color:var(--text2);font-family:var(--mono)}
+.header-badge{margin-left:auto;padding:4px 12px;border-radius:20px;background:rgba(108,139,255,.12);border:1px solid rgba(108,139,255,.3);font-size:.7rem;color:var(--accent);font-family:var(--mono)}
+
+main{flex:1;display:grid;grid-template-columns:300px 1fr 340px;gap:0;height:calc(100vh - 65px)}
+.panel{padding:20px;overflow-y:auto;border-right:1px solid var(--border)}
+.panel:last-child{border-right:none}
+.panel-title{font-size:.65rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text2);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.panel-title::after{content:'';flex:1;height:1px;background:var(--border)}
+
+.upload-zone{border:2px dashed var(--border-glow);border-radius:var(--radius);padding:28px 16px;text-align:center;cursor:pointer;transition:all .25s;background:var(--glass);position:relative;overflow:hidden;margin-bottom:20px}
+.upload-zone:hover,.upload-zone.dragover{border-color:var(--accent);background:rgba(108,139,255,.08);box-shadow:0 0 28px rgba(108,139,255,.15)}
+.upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-icon{font-size:2rem;margin-bottom:8px;opacity:.6}
+.upload-zone p{font-size:.8rem;color:var(--text2)}.upload-zone strong{color:var(--accent)}
+#preview-wrap{display:none;margin-top:10px;border-radius:var(--radius-sm);overflow:hidden;border:1px solid var(--border)}
+#preview-wrap img{width:100%;display:block;max-height:180px;object-fit:cover}
+.file-info{font-size:.7rem;color:var(--text2);font-family:var(--mono);padding:6px 0 0}
+
+.ctrl-group{margin-bottom:18px}.ctrl-label{font-size:.72rem;color:var(--text2);margin-bottom:8px;display:block}
+.pill-group{display:flex;gap:6px;flex-wrap:wrap}
+.pill{padding:5px 14px;border-radius:20px;font-size:.75rem;cursor:pointer;border:1px solid var(--border-glow);background:var(--glass);color:var(--text2);transition:all .2s;font-family:var(--mono)}
+.pill:hover{border-color:var(--accent);color:var(--accent)}
+.pill.active{background:rgba(108,139,255,.2);border-color:var(--accent);color:var(--accent);box-shadow:0 0 12px rgba(108,139,255,.2)}
+.toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.toggle{position:relative;width:38px;height:20px;cursor:pointer}.toggle input{opacity:0;width:0;height:0}
+.toggle-track{position:absolute;inset:0;border-radius:20px;background:var(--bg3);border:1px solid var(--border-glow);transition:.25s}
+.toggle input:checked+.toggle-track{background:rgba(108,139,255,.3);border-color:var(--accent)}
+.toggle-thumb{position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--text2);transition:.25s}
+.toggle input:checked~.toggle-thumb{left:21px;background:var(--accent)}
+.toggle-label{font-size:.78rem;color:var(--text)}
+#lanczos-a-group{transition:opacity .2s}
+
+#run-btn{width:100%;padding:13px;margin-top:8px;border-radius:var(--radius);background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#fff;font-size:.9rem;font-weight:600;cursor:pointer;transition:all .25s;letter-spacing:.03em;box-shadow:0 4px 24px rgba(108,139,255,.35);font-family:var(--sans)}
+#run-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 32px rgba(108,139,255,.5)}
+#run-btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+#run-btn.running{background:linear-gradient(135deg,#1e2340,#2a304a);box-shadow:none}
+
+.viz-panel{padding:0;display:flex;flex-direction:column;position:relative;border-right:1px solid var(--border)}
+#viz-canvas-wrap{flex:1;position:relative;background:radial-gradient(ellipse at 50% 60%,#0a0f2a 0%,#07080f 70%)}
+#three-canvas{display:block;width:100%;height:100%}
+
+.viz-top-bar{position:absolute;top:0;left:0;right:0;padding:12px 16px;display:flex;align-items:center;gap:10px;z-index:10;background:linear-gradient(to bottom,rgba(7,8,15,.85),transparent)}
+.viz-title{font-size:.7rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text2)}
+.view-tabs{display:flex;gap:4px;margin-left:auto}
+.view-tab{padding:3px 10px;border-radius:12px;font-size:.68rem;cursor:pointer;border:1px solid var(--border);background:var(--glass);color:var(--text2);font-family:var(--mono);transition:all .2s}
+.view-tab:hover,.view-tab.active{border-color:var(--accent);color:var(--accent)}
+.viz-bottom-bar{position:absolute;bottom:0;left:0;right:0;padding:10px 16px;display:flex;gap:16px;align-items:center;z-index:10;background:linear-gradient(to top,rgba(7,8,15,.9),transparent);font-family:var(--mono);font-size:.65rem;color:var(--text2)}
+.viz-legend{display:flex;align-items:center;gap:6px}
+.viz-dot{width:8px;height:8px;border-radius:50%}
+#replay-btn{margin-left:auto;padding:4px 12px;border-radius:10px;border:1px solid var(--border-glow);background:var(--glass);color:var(--text2);font-size:.65rem;cursor:pointer;font-family:var(--mono);transition:all .2s}
+#replay-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+
+#progress-overlay{position:absolute;inset:0;background:rgba(7,8,15,.88);backdrop-filter:blur(4px);z-index:20;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+#progress-overlay.visible{display:flex}
+.stage-track{display:flex;gap:8px;align-items:center}
+.stage-dot{width:32px;height:32px;border-radius:50%;border:1.5px solid var(--border-glow);background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:.65rem;font-family:var(--mono);color:var(--text2);transition:all .4s}
+.stage-dot.done{border-color:var(--green);color:var(--green);box-shadow:0 0 14px rgba(57,255,138,.3)}
+.stage-dot.active{border-color:var(--accent);color:var(--accent);box-shadow:0 0 14px rgba(108,139,255,.4);animation:pulse-dot 1s infinite}
+.stage-connector{width:20px;height:1.5px;background:var(--border-glow)}.stage-connector.done{background:var(--green)}
+@keyframes pulse-dot{0%,100%{box-shadow:0 0 10px rgba(108,139,255,.3)}50%{box-shadow:0 0 22px rgba(108,139,255,.6)}}
+#stage-label{font-size:.85rem;color:var(--text2);font-family:var(--mono)}
+#stage-detail{font-size:.72rem;color:var(--text2);font-family:var(--mono);opacity:.7}
+.spinner{width:28px;height:28px;border:2.5px solid var(--border-glow);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.results-panel{display:flex;flex-direction:column;gap:0}.results-panel .panel{border-right:none}
+.compare-wrap{position:relative;border-radius:var(--radius);overflow:hidden;background:var(--bg2);min-height:200px;border:1px solid var(--border);margin-bottom:16px}
+.compare-before,.compare-after{position:absolute;top:0;left:0;width:100%;height:100%;background:var(--bg3)}
+.compare-before img,.compare-after img{width:100%;height:100%;object-fit:contain;display:block}
+.compare-after{clip-path:inset(0 50% 0 0)}
+.compare-divider{position:absolute;top:0;bottom:0;left:50%;width:2px;background:rgba(255,255,255,.6);cursor:ew-resize;z-index:5;transform:translateX(-50%)}
+.compare-divider::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:28px;height:28px;border-radius:50%;background:white;box-shadow:0 2px 12px rgba(0,0,0,.5)}
+.compare-label{position:absolute;top:8px;font-size:.62rem;font-family:var(--mono);padding:3px 8px;border-radius:6px;background:rgba(0,0,0,.55);pointer-events:none;z-index:6}
+.compare-label.before{left:8px}.compare-label.after{right:8px}
+.placeholder-box{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;height:200px;color:var(--text2);font-size:.8rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg2)}
+.placeholder-box .ico{font-size:2.5rem;opacity:.3}
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.stat-card{padding:10px 12px;border-radius:var(--radius-sm);background:var(--glass);border:1px solid var(--glass-border)}
+.stat-card .s-label{font-size:.62rem;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono)}
+.stat-card .s-val{font-size:.9rem;font-weight:600;margin-top:2px;font-family:var(--mono)}
+.btn-download{display:block;width:100%;padding:10px;text-align:center;border-radius:var(--radius-sm);border:1px solid var(--border-glow);background:var(--glass);color:var(--text);font-size:.8rem;cursor:pointer;text-decoration:none;transition:all .2s;font-family:var(--sans);margin-bottom:8px}
+.btn-download:hover{border-color:var(--accent);color:var(--accent);background:rgba(108,139,255,.08)}
+#toast{position:fixed;bottom:24px;right:24px;z-index:999;padding:12px 18px;border-radius:var(--radius-sm);background:rgba(255,77,106,.15);border:1px solid var(--red);color:var(--red);font-size:.8rem;font-family:var(--mono);transform:translateY(80px);opacity:0;transition:all .3s;pointer-events:none}
+#toast.show{transform:translateY(0);opacity:1}
+@media(max-width:1100px){main{grid-template-columns:260px 1fr 300px}}
+@media(max-width:800px){main{grid-template-columns:1fr;grid-template-rows:auto}.viz-panel{height:60vw;min-height:300px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">&#x2B21;</div>
+  <div><h1>Image Decoding Pipeline</h1><p>Bicubic &amp; Lanczos signal reconstruction</p></div>
+  <div class="header-badge">v2.0 &middot; Python + Three.js</div>
+</header>
+<main>
+  <div class="panel" id="controls-panel">
+    <div class="panel-title">Upload</div>
+    <div class="upload-zone" id="upload-zone">
+      <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.bmp,.tiff,.webp"/>
+      <div class="upload-icon">&#x1F5BC;</div>
+      <p>Drop image here or <strong>browse</strong></p>
+      <p style="font-size:.68rem;margin-top:4px">PNG &middot; JPEG &middot; BMP &middot; TIFF</p>
+      <div id="preview-wrap"><img id="preview-img"/></div>
+      <div class="file-info" id="file-info"></div>
+    </div>
+    <div class="panel-title">Parameters</div>
+    <div class="ctrl-group"><span class="ctrl-label">Scale factor</span>
+      <div class="pill-group" id="scale-group"><div class="pill active" data-val="2">2&times;</div><div class="pill" data-val="4">4&times;</div><div class="pill" data-val="8">8&times;</div></div>
+    </div>
+    <div class="ctrl-group"><span class="ctrl-label">Method</span>
+      <div class="pill-group" id="method-group"><div class="pill" data-val="bicubic">Bicubic</div><div class="pill active" data-val="lanczos">Lanczos</div></div>
+    </div>
+    <div class="ctrl-group" id="lanczos-a-group"><span class="ctrl-label">Lanczos window (a)</span>
+      <div class="pill-group" id="la-group"><div class="pill" data-val="2">a=2 Fast</div><div class="pill active" data-val="3">a=3 Sharp</div></div>
+    </div>
+    <div class="ctrl-group">
+      <div class="toggle-row"><label class="toggle"><input type="checkbox" id="sharpen-toggle"/><div class="toggle-track"></div><div class="toggle-thumb"></div></label><span class="toggle-label">Sharpen (UnsharpMask)</span></div>
+      <div class="toggle-row"><label class="toggle"><input type="checkbox" id="compare-toggle"/><div class="toggle-track"></div><div class="toggle-thumb"></div></label><span class="toggle-label">Compare both methods</span></div>
+    </div>
+    <button id="run-btn" disabled>Run Pipeline</button>
+  </div>
+
+  <div class="viz-panel" id="viz-panel">
+    <div id="viz-canvas-wrap">
+      <canvas id="three-canvas"></canvas>
+      <div class="viz-top-bar">
+        <span class="viz-title" id="viz-title">Upload an image to begin</span>
+        <div class="view-tabs">
+          <div class="view-tab active" data-v="side">Side</div>
+          <div class="view-tab" data-v="diag">Diag</div>
+          <div class="view-tab" data-v="top">Top</div>
+        </div>
+      </div>
+      <div class="viz-bottom-bar">
+        <div class="viz-legend"><div class="viz-dot" style="background:linear-gradient(135deg,#ff4d6a,#6c8bff);box-shadow:0 0 6px #6c8bff"></div>Pixel</div>
+        <div class="viz-legend"><div class="viz-dot" style="border:1.5px solid #00e5ff;background:transparent;box-shadow:0 0 6px #00e5ff"></div>Empty (NaN)</div>
+        <div class="viz-legend"><div class="viz-dot" style="background:var(--green);box-shadow:0 0 6px var(--green)"></div>Filled</div>
+        <button id="replay-btn">&#x21BA; Replay</button>
+      </div>
+      <div id="progress-overlay">
+        <div class="stage-track" id="stage-track">
+          <div class="stage-dot" data-s="1">1</div><div class="stage-connector" id="conn-1"></div>
+          <div class="stage-dot" data-s="2">2</div><div class="stage-connector" id="conn-2"></div>
+          <div class="stage-dot" data-s="3">3</div><div class="stage-connector" id="conn-3"></div>
+          <div class="stage-dot" data-s="4">4</div><div class="stage-connector" id="conn-4"></div>
+          <div class="stage-dot" data-s="5">5</div>
+        </div>
+        <div class="spinner"></div>
+        <div id="stage-label">Initialising...</div>
+        <div id="stage-detail"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel results-panel">
+    <div class="panel-title">Results</div>
+    <div id="placeholder" class="placeholder-box"><div class="ico">&#x1F52C;</div><div>Output appears here after running</div></div>
+    <div id="results-content" style="display:none">
+      <div class="compare-wrap" id="compare-wrap" style="height:220px">
+        <div class="compare-before"><img id="img-before"/></div>
+        <div class="compare-after" id="compare-after"><img id="img-after"/></div>
+        <div class="compare-divider" id="compare-divider"></div>
+        <div class="compare-label before">Original</div>
+        <div class="compare-label after">Decoded</div>
+      </div>
+      <div class="stats-grid"><div class="stat-card"><div class="s-label">Input</div><div class="s-val" id="stat-in">&mdash;</div></div><div class="stat-card"><div class="s-label">Output</div><div class="s-val" id="stat-out">&mdash;</div></div><div class="stat-card"><div class="s-label">Method</div><div class="s-val" id="stat-method">&mdash;</div></div><div class="stat-card"><div class="s-label">Scale</div><div class="s-val" id="stat-scale">&mdash;</div></div></div>
+      <div id="download-links"></div>
+    </div>
+  </div>
+</main>
+<div id="toast"></div>
+<script>
+// ====================================================================
+// VIZ ENGINE — Stage-synced 3D visualisation
+//   Upload  -> flat image grid of coloured cubes in centre
+//   Stage 2 -> dissolve: cubes fly to larger sparse grid; empties = cyan wireframes
+//   Stage 3 -> fill: vectors from anchors to empties, empties bloom with colour
+// ====================================================================
+const VIZ = (() => {
+  let renderer, scene, camera, controls;
+  let currentView = 'side';
+  let imageGroup = null, sparseGroup = null, arrowGroup = null, fillArrowGroup = null;
+  let _anchorMeshes = {}, _emptyMeshes = [], _gridData = null;
+  let _sceneGap = 20, _maxDim = 10;
+
+  const VIEWS = {
+    side: (g,m) => ({pos:[m*0.3,m*0.4,g*1.6],tgt:[0,0,g*0.45]}),
+    diag: (g,m) => ({pos:[m*1.0,m*0.7,g*1.1],tgt:[0,0,g*0.45]}),
+    top:  (g,m) => ({pos:[0,m*2.2,g*0.45],tgt:[0,0,g*0.45]}),
+  };
+
+  function init(){
+    const canvas = document.getElementById('three-canvas');
+    renderer = new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setClearColor(0x000000,0);
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(40,1,0.01,800);
+    camera.position.set(6,6,20);
+    controls = new THREE.OrbitControls(camera,renderer.domElement);
+    controls.enableDamping=true; controls.dampingFactor=0.06;
+    controls.minDistance=3; controls.maxDistance=200;
+    scene.add(new THREE.AmbientLight(0x223355,2.5));
+    const dl=new THREE.DirectionalLight(0xffffff,1.0); dl.position.set(4,8,6); scene.add(dl);
+    resize(); window.addEventListener('resize',resize);
+    (function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera)})();
+  }
+
+  function resize(){
+    const w=document.getElementById('viz-canvas-wrap');
+    if(!w)return;
+    renderer.setSize(w.clientWidth,w.clientHeight);
+    camera.aspect=w.clientWidth/w.clientHeight;
+    camera.updateProjectionMatrix();
+  }
+
+  function clearAll(){
+    [imageGroup,sparseGroup,arrowGroup,fillArrowGroup].forEach(g=>{if(g)scene.remove(g)});
+    imageGroup=sparseGroup=arrowGroup=fillArrowGroup=null;
+    _anchorMeshes={}; _emptyMeshes=[];
+  }
+
+  function setCamera(v){
+    currentView=v||currentView;
+    const p=(VIEWS[currentView]||VIEWS.side)(_sceneGap,_maxDim);
+    camera.position.set(...p.pos); controls.target.set(...p.tgt);
+    camera.lookAt(...p.tgt); controls.update();
+  }
+
+  // === UPLOAD: show image as flat 3D grid ===
+  function showImage(pixels,w,h){
+    clearAll();
+    document.getElementById('viz-title').textContent='Uploaded Image';
+    imageGroup=new THREE.Group();
+    const SP=1.0, cx=(w-1)*SP*0.5, cy=(h-1)*SP*0.5;
+    const geo=new THREE.BoxGeometry(SP*0.9,SP*0.9,SP*0.15);
+    pixels.forEach(px=>{
+      const col=new THREE.Color(px.r,px.g,px.b);
+      const lum=0.2126*px.r+0.7152*px.g+0.0722*px.b;
+      const mat=new THREE.MeshStandardMaterial({
+        color:col,emissive:col.clone().multiplyScalar(0.5+lum*0.4),
+        emissiveIntensity:1.2,metalness:0.1,roughness:0.35
+      });
+      const mesh=new THREE.Mesh(geo,mat);
+      mesh.position.set(px.orig[0]*SP-cx,-(px.orig[1]*SP-cy),0);
+      imageGroup.add(mesh);
+    });
+    scene.add(imageGroup);
+    _maxDim=Math.max(w,h); _sceneGap=0;
+    camera.position.set(0,0,_maxDim*1.6);
+    controls.target.set(0,0,0); controls.update();
+  }
+
+  // === STAGE 2: dissolve to sparse grid ===
+  function dissolveToGrid(data){
+    _gridData=data;
+    document.getElementById('viz-title').textContent='Stage 2 \u00b7 Grid Mapping';
+    const scale=data.scale, origW=data.orig_w, origH=data.orig_h;
+    const newW=data.new_w, newH=data.new_h, SP=1.0;
+    const newCX=(newW-1)*SP*0.5, newCY=(newH-1)*SP*0.5;
+    _sceneGap=Math.max(origW,origH)*SP*3.0;
+    _maxDim=Math.max(newW,newH)*SP;
+
+    sparseGroup=new THREE.Group(); arrowGroup=new THREE.Group();
+    const emptyGeo=new THREE.BoxGeometry(SP*0.5,SP*0.5,SP*0.5);
+    const emptyEdge=new THREE.EdgesGeometry(emptyGeo);
+    const anchorGeo=new THREE.SphereGeometry(SP*0.25,12,12);
+    const pixMap={};
+    data.pixels.forEach(px=>{pixMap[px.orig[0]+','+px.orig[1]]=px});
+
+    for(let nr=0;nr<newH;nr++){
+      for(let nc=0;nc<newW;nc++){
+        const wx=nc*SP-newCX, wy=-(nr*SP-newCY), wz=_sceneGap;
+        const isAnch=(nr%scale===0&&nc%scale===0);
+        if(isAnch){
+          const oC=nc/scale, oR=nr/scale;
+          const px=pixMap[oC+','+oR];
+          const col=px?new THREE.Color(px.r,px.g,px.b):new THREE.Color(0.5,0.5,0.5);
+          const mat=new THREE.MeshStandardMaterial({
+            color:col,emissive:col.clone().multiplyScalar(1.2),
+            emissiveIntensity:1.6,metalness:0,roughness:0.2
+          });
+          const mesh=new THREE.Mesh(anchorGeo,mat);
+          mesh.position.set(wx,wy,wz); sparseGroup.add(mesh);
+          _anchorMeshes[nc+','+nr]=mesh;
+        } else {
+          const line=new THREE.LineSegments(emptyEdge,
+            new THREE.LineBasicMaterial({color:0x00e5ff,transparent:true,opacity:0.35}));
+          line.position.set(wx,wy,wz); sparseGroup.add(line);
+          _emptyMeshes.push({mesh:line,nc:nc,nr:nr,wx:wx,wy:wy,wz:wz});
+        }
+      }
+    }
+    scene.add(sparseGroup); scene.add(arrowGroup);
+    setCamera('side');
+
+    // animate arrows from orig cubes to anchors
+    const origCX=(origW-1)*SP*0.5, origCY=(origH-1)*SP*0.5;
+    let idx=0; const total=data.pixels.length;
+    const batch=Math.max(1,Math.floor(total/50));
+    (function step(){
+      const end=Math.min(idx+batch,total);
+      for(let i=idx;i<end;i++){
+        const px=data.pixels[i];
+        const from=new THREE.Vector3(px.orig[0]*SP-origCX,-(px.orig[1]*SP-origCY),0);
+        const aM=_anchorMeshes[px.mapped[0]+','+px.mapped[1]];
+        if(!aM)continue;
+        const to=aM.position.clone();
+        const col=new THREE.Color(px.r,px.g,px.b).addScalar(0.15);
+        const dir=new THREE.Vector3().subVectors(to,from).normalize();
+        const len=from.distanceTo(to);
+        const arr=new THREE.ArrowHelper(dir,from,len,col.getHex(),len*0.08,0.2);
+        arr.line.material.transparent=true; arr.line.material.opacity=0.6;
+        arrowGroup.add(arr);
+      }
+      idx=end;
+      if(idx<total)setTimeout(step,25);
+    })();
+  }
+
+  // === STAGE 3: fill empties with interpolated colours ===
+  function fillInterpolated(colorMap){
+    document.getElementById('viz-title').textContent='Stage 3 \u00b7 Interpolation';
+    if(fillArrowGroup)scene.remove(fillArrowGroup);
+    fillArrowGroup=new THREE.Group(); scene.add(fillArrowGroup);
+    if(!_gridData)return;
+    const scale=_gridData.scale, SP=1.0;
+    const filledGeo=new THREE.SphereGeometry(SP*0.2,10,10);
+    let idx=0; const total=_emptyMeshes.length;
+    const batch=Math.max(1,Math.floor(total/80));
+    (function step(){
+      const end=Math.min(idx+batch,total);
+      for(let i=idx;i<end;i++){
+        const em=_emptyMeshes[i];
+        const px=colorMap[em.nc+','+em.nr];
+        if(!px)continue;
+        // find nearest anchor for the vector
+        const aNc=Math.round(em.nc/scale)*scale, aNr=Math.round(em.nr/scale)*scale;
+        const aM=_anchorMeshes[aNc+','+aNr];
+        if(aM){
+          const from=aM.position.clone();
+          const to=new THREE.Vector3(em.wx,em.wy,em.wz);
+          const dir=new THREE.Vector3().subVectors(to,from).normalize();
+          const len=from.distanceTo(to);
+          if(len>0.01){
+            const a=new THREE.ArrowHelper(dir,from,len,0x39ff8a,len*0.15,0.15);
+            a.line.material.transparent=true; a.line.material.opacity=0.4;
+            fillArrowGroup.add(a);
+          }
+        }
+        const col=new THREE.Color(px.r,px.g,px.b);
+        const mat=new THREE.MeshStandardMaterial({
+          color:col,emissive:col.clone().multiplyScalar(1.0),
+          emissiveIntensity:1.3,metalness:0,roughness:0.25
+        });
+        const sm=new THREE.Mesh(filledGeo,mat);
+        sm.position.set(em.wx,em.wy,em.wz);
+        sparseGroup.add(sm);
+        em.mesh.visible=false;
+      }
+      idx=end;
+      if(idx<total)setTimeout(step,18);
+      else document.getElementById('viz-title').textContent='Reconstructed';
+    })();
+  }
+
+  function setView(v){
+    currentView=v;
+    document.querySelectorAll('.view-tab').forEach(t=>t.classList.toggle('active',t.dataset.v===v));
+    setCamera(v);
+  }
+
+  function replay(){if(_gridData)dissolveToGrid(_gridData)}
+
+  return {init,showImage,dissolveToGrid,fillInterpolated,setView,replay};
+})();
+
+// ==== UI ====
+let uploadedFile=null, uploadedURL=null, isRunning=false;
+function makePillGroup(id,fn){
+  document.getElementById(id).addEventListener('click',e=>{
+    const p=e.target.closest('.pill'); if(!p)return;
+    document.querySelectorAll('#'+id+' .pill').forEach(x=>x.classList.remove('active'));
+    p.classList.add('active'); fn(p.dataset.val);
+  });
+}
+makePillGroup('scale-group',()=>{});
+makePillGroup('method-group',v=>{document.getElementById('lanczos-a-group').style.opacity=v==='bicubic'?'0.35':'1'});
+makePillGroup('la-group',()=>{});
+
+const uploadZone=document.getElementById('upload-zone');
+const fileInput=document.getElementById('file-input');
+['dragover','dragenter'].forEach(ev=>uploadZone.addEventListener(ev,e=>{e.preventDefault();uploadZone.classList.add('dragover')}));
+['dragleave','drop'].forEach(ev=>uploadZone.addEventListener(ev,e=>{e.preventDefault();uploadZone.classList.remove('dragover');if(ev==='drop')handleFile(e.dataTransfer.files[0])}));
+fileInput.addEventListener('change',()=>handleFile(fileInput.files[0]));
+
+function handleFile(file){
+  if(!file)return;
+  uploadedFile=file;
+  uploadedURL=URL.createObjectURL(file);
+  document.getElementById('preview-img').src=uploadedURL;
+  document.getElementById('preview-wrap').style.display='block';
+  document.getElementById('file-info').textContent=file.name+'  \u00b7  '+(file.size/1024).toFixed(1)+' KB';
+  document.getElementById('img-before').src=uploadedURL;
+  document.getElementById('run-btn').disabled=false;
+
+  // sample image and show as 3D grid
+  const img=new Image();
+  img.onload=()=>{
+    const maxT=16, ow=img.naturalWidth, oh=img.naturalHeight;
+    const tw=Math.min(ow,maxT), th=Math.min(oh,maxT);
+    const c=document.createElement('canvas'); c.width=tw; c.height=th;
+    const ctx=c.getContext('2d'); ctx.drawImage(img,0,0,tw,th);
+    const d=ctx.getImageData(0,0,tw,th).data;
+    const pixels=[];
+    for(let r=0;r<th;r++) for(let col=0;col<tw;col++){
+      const i=(r*tw+col)*4;
+      pixels.push({orig:[col,r],r:d[i]/255,g:d[i+1]/255,b:d[i+2]/255});
+    }
+    VIZ.showImage(pixels,tw,th);
+  };
+  img.src=uploadedURL;
+}
+
+document.querySelectorAll('.view-tab').forEach(t=>t.addEventListener('click',()=>VIZ.setView(t.dataset.v)));
+document.getElementById('replay-btn').addEventListener('click',VIZ.replay);
+
+function showProgress(){
+  document.getElementById('progress-overlay').classList.add('visible');
+  document.querySelectorAll('.stage-dot').forEach(d=>d.className='stage-dot');
+  document.querySelectorAll('.stage-connector').forEach(c=>c.classList.remove('done'));
+  document.getElementById('stage-label').textContent='Starting...';
+  document.getElementById('stage-detail').textContent='';
+}
+function hideProgress(){document.getElementById('progress-overlay').classList.remove('visible')}
+function setStage(n,l){
+  document.querySelectorAll('.stage-dot').forEach(d=>{
+    const s=+d.dataset.s; d.classList.remove('active','done');
+    if(s<n){d.classList.add('done');const c=document.getElementById('conn-'+s);if(c)c.classList.add('done')}
+    else if(s===n)d.classList.add('active');
+  });
+  document.getElementById('stage-label').textContent='['+n+'/5] '+l;
+}
+function setDetail(t){document.getElementById('stage-detail').textContent=t}
+
+let dragging=false;
+const divider=document.getElementById('compare-divider');
+const afterClip=document.getElementById('compare-after');
+const cmpWrap=document.getElementById('compare-wrap');
+divider.addEventListener('mousedown',()=>dragging=true);
+document.addEventListener('mouseup',()=>dragging=false);
+document.addEventListener('mousemove',e=>{
+  if(!dragging)return;
+  const r=cmpWrap.getBoundingClientRect();
+  let f=Math.max(0.05,Math.min(0.95,(e.clientX-r.left)/r.width));
+  divider.style.left=f*100+'%'; afterClip.style.clipPath='inset(0 '+(100-f*100)+'% 0 0)';
+});
+
+function showToast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),4000)}
+
+document.getElementById('run-btn').addEventListener('click',async()=>{
+  if(!uploadedFile||isRunning)return;
+  isRunning=true;
+  const btn=document.getElementById('run-btn');
+  btn.disabled=true; btn.textContent='Running...'; btn.classList.add('running');
+  showProgress();
+  const fd=new FormData();
+  fd.append('file',uploadedFile);
+  fd.append('scale',document.querySelector('#scale-group .pill.active').dataset.val);
+  fd.append('method',document.querySelector('#method-group .pill.active').dataset.val);
+  fd.append('lanczos_a',document.querySelector('#la-group .pill.active').dataset.val);
+  fd.append('sharpen',document.getElementById('sharpen-toggle').checked?'true':'false');
+  fd.append('compare',document.getElementById('compare-toggle').checked?'true':'false');
+  try{
+    const resp=await fetch('/api/process',{method:'POST',body:fd});
+    if(!resp.ok)throw new Error('Server error '+resp.status);
+    const reader=resp.body.getReader(); const dec=new TextDecoder(); let buf='';
+    while(true){
+      const{done,value}=await reader.read(); if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      const parts=buf.split('\n\n'); buf=parts.pop();
+      for(const part of parts){
+        if(!part.trim())continue;
+        const lines=part.split('\n'); let ev='',dt='';
+        lines.forEach(l=>{if(l.startsWith('event:'))ev=l.slice(6).trim();if(l.startsWith('data:'))dt=l.slice(5).trim()});
+        if(!ev||!dt)continue;
+        try{handleSSE(ev,JSON.parse(dt))}catch{}
+      }
+    }
+  }catch(e){showToast('Error: '+e.message);hideProgress()}
+  finally{isRunning=false;btn.disabled=false;btn.textContent='Run Pipeline';btn.classList.remove('running')}
+});
+
+function handleSSE(ev,p){
+  if(ev==='stage'){setStage(p.stage,p.label);if(p.stage>=2)hideProgress()}
+  else if(ev==='progress'){setDetail(p.detail+' \u00b7 '+p.elapsed+'s')}
+  else if(ev==='channel'){setDetail('Channel '+p.channel+' \u2014 '+p.method)}
+  else if(ev==='griddata'){VIZ.dissolveToGrid(p)}
+  else if(ev==='done'){hideProgress();showResults(p)}
+  else if(ev==='error'){hideProgress();showToast('Pipeline error: '+p.message)}
+}
+
+function showResults(payload){
+  document.getElementById('placeholder').style.display='none';
+  document.getElementById('results-content').style.display='block';
+  const outputs=payload.outputs, methods=Object.keys(outputs), ff=outputs[methods[0]];
+  document.getElementById('img-before').src=uploadedURL;
+  document.getElementById('img-after').src='/api/output/'+ff;
+  document.getElementById('compare-divider').style.left='50%';
+  document.getElementById('compare-after').style.clipPath='inset(0 50% 0 0)';
+  const info=payload.image_info, gi=payload.grid_info;
+  document.getElementById('stat-in').textContent=info.width+'\u00d7'+info.height;
+  document.getElementById('stat-out').textContent=gi.new_width+'\u00d7'+gi.new_height;
+  document.getElementById('stat-method').textContent=methods.join(' + ').toUpperCase();
+  document.getElementById('stat-scale').textContent=gi.scale_factor+'\u00d7';
+  const dl=document.getElementById('download-links'); dl.innerHTML='';
+  methods.forEach(m=>{
+    const a=document.createElement('a'); a.href='/api/output/'+outputs[m]; a.download=outputs[m];
+    a.className='btn-download'; a.textContent='Download '+m.toUpperCase()+' result';
+    dl.appendChild(a);
+  });
+  // Stage 3 fill animation: sample output image then call fillInterpolated
+  const sampImg=new Image(); sampImg.crossOrigin='anonymous';
+  sampImg.onload=()=>{
+    const c=document.createElement('canvas'); c.width=sampImg.naturalWidth; c.height=sampImg.naturalHeight;
+    const ctx=c.getContext('2d'); ctx.drawImage(sampImg,0,0);
+    const colorMap={};
+    const nW=Math.min(gi.new_width,c.width), nH=Math.min(gi.new_height,c.height);
+    const imgD=ctx.getImageData(0,0,nW,nH).data;
+    for(let nr=0;nr<nH;nr++) for(let nc=0;nc<nW;nc++){
+      const i=(nr*nW+nc)*4;
+      colorMap[nc+','+nr]={r:imgD[i]/255,g:imgD[i+1]/255,b:imgD[i+2]/255};
+    }
+    VIZ.fillInterpolated(colorMap);
+  };
+  sampImg.src='/api/output/'+ff;
+}
+
+window.addEventListener('load',()=>{VIZ.init()});
+</script>
+</body>
+</html>
