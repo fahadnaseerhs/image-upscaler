@@ -14,6 +14,7 @@ A Python-based image upscaling pipeline that reconstructs high-resolution images
 - **Lanczos Interpolation** — Windowed sinc kernel (a=2 or a=3) via Pillow
 - **Multiple Scale Factors** — 2×, 4×, or 8× upscaling
 - **Post-Processing Sharpening** — Optional UnsharpMask to recover edge crispness
+- **AI Enhancement (Optional)** — Real-ESRGAN model for true detail enhancement
 - **Compare Mode** — Run both algorithms side-by-side with a difference map
 - **Web UI** — Dark-themed glassmorphism interface with drag-and-drop upload
 - **3D Visualization** — Real-time Three.js animation showing the decoding pipeline:
@@ -36,11 +37,20 @@ A Python-based image upscaling pipeline that reconstructs high-resolution images
 | `pillow`     | Image I/O, Lanczos resize, sharpening  |
 | `scipy`      | Bicubic interpolation (map_coordinates)|
 | `matplotlib` | CLI visualizations and compare plots   |
+| `torch` + `torchvision` | Real-ESRGAN inference backend (optional) |
+| `realesrgan` + `basicsr` | AI model loader/runtime (optional) |
+| `opencv-python` | Image conversion for Real-ESRGAN I/O (optional) |
 
 ### Install
 
 ```bash
 pip install flask numpy pillow scipy matplotlib
+```
+
+### Optional AI Enhancer Dependencies (Real-ESRGAN)
+
+```bash
+pip install torch torchvision realesrgan basicsr opencv-python gfpgan
 ```
 
 ---
@@ -81,9 +91,10 @@ python main.py --input photo.jpg
 1. **Upload** an image (PNG, JPEG, BMP, TIFF, WebP)
 2. **Configure** parameters:
    - Scale factor: `2×`, `4×`, or `8×`
-   - Method: `Bicubic` or `Lanczos`
+   - Method: `Bicubic`, `Lanczos`, or `AI (Real-ESRGAN)`
    - Lanczos window: `a=2` (fast) or `a=3` (sharp)
    - Toggle **Sharpen** or **Compare** mode
+   - In AI mode you can set a Real-ESRGAN `tile` size and optionally enable face restoration (GFPGAN)
 3. Click **Run Pipeline** and watch the 3D visualization
 4. **Download** the upscaled result from the results panel
 
