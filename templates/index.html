@@ -133,11 +133,12 @@ main{flex:1;display:grid;grid-template-columns:300px 1fr 340px;gap:0;height:calc
       <div class="file-info" id="file-info"></div>
     </div>
     <div class="panel-title">Parameters</div>
+    <div class="file-info" id="hw-info" style="padding:0 0 14px 0">Detecting hardware...</div>
     <div class="ctrl-group"><span class="ctrl-label">Scale factor</span>
       <div class="pill-group" id="scale-group"><div class="pill active" data-val="2">2&times;</div><div class="pill" data-val="4">4&times;</div><div class="pill" data-val="8">8&times;</div></div>
     </div>
     <div class="ctrl-group"><span class="ctrl-label">Method</span>
-      <div class="pill-group" id="method-group"><div class="pill" data-val="bicubic">Bicubic</div><div class="pill active" data-val="lanczos">Lanczos</div></div>
+      <div class="pill-group" id="method-group"><div class="pill" data-val="bicubic">Bicubic</div><div class="pill active" data-val="lanczos">Lanczos</div><div class="pill" data-val="realesrgan">AI (Real-ESRGAN)</div></div>
     </div>
     <div class="ctrl-group" id="lanczos-a-group"><span class="ctrl-label">Lanczos window (a)</span>
       <div class="pill-group" id="la-group"><div class="pill" data-val="2">a=2 Fast</div><div class="pill active" data-val="3">a=3 Sharp</div></div>
@@ -145,6 +146,20 @@ main{flex:1;display:grid;grid-template-columns:300px 1fr 340px;gap:0;height:calc
     <div class="ctrl-group">
       <div class="toggle-row"><label class="toggle"><input type="checkbox" id="sharpen-toggle"/><div class="toggle-track"></div><div class="toggle-thumb"></div></label><span class="toggle-label">Sharpen (UnsharpMask)</span></div>
       <div class="toggle-row"><label class="toggle"><input type="checkbox" id="compare-toggle"/><div class="toggle-track"></div><div class="toggle-thumb"></div></label><span class="toggle-label">Compare both methods</span></div>
+      <div id="ai-note" style="display:none;font-size:.68rem;color:var(--text2);font-family:var(--mono);margin-top:6px">AI mode runs Real-ESRGAN enhancement. Compare is disabled.</div>
+    </div>
+    <div class="ctrl-group" id="realesrgan-tile-group" style="display:none">
+      <span class="ctrl-label">AI tile size (VRAM/RAM)</span>
+      <input type="number" id="tile-size-input" value="0" min="0" max="2048" step="64"
+        style="width:100%;padding:10px 12px;border-radius:10px;background:var(--bg3);border:1px solid var(--border-glow);color:var(--text);font-family:var(--mono);outline:none"/>
+      <div class="file-info" style="padding:8px 0 0">0 = auto (whole image). Smaller = safer with limited memory.</div>
+    </div>
+    <div class="ctrl-group" id="realesrgan-face-group" style="display:none">
+      <div class="toggle-row"><label class="toggle">
+        <input type="checkbox" id="face-enhance-toggle"/>
+        <div class="toggle-track"></div><div class="toggle-thumb"></div>
+      </label><span class="toggle-label">Face enhancement (GFPGAN)</span></div>
+      <div class="file-info" style="padding:8px 0 0">Optional. Needs `gfpgan` installed.</div>
     </div>
     <button id="run-btn" disabled>Run Pipeline</button>
   </div>
@@ -414,8 +429,39 @@ function makePillGroup(id,fn){
   });
 }
 makePillGroup('scale-group',()=>{});
-makePillGroup('method-group',v=>{document.getElementById('lanczos-a-group').style.opacity=v==='bicubic'?'0.35':'1'});
+makePillGroup('method-group',v=>{updateMethodControls(v)});
 makePillGroup('la-group',()=>{});
+
+function updateMethodControls(method){
+  const lanczosGroup=document.getElementById('lanczos-a-group');
+  const compareToggle=document.getElementById('compare-toggle');
+  const compareLabel=compareToggle.closest('.toggle-row');
+  const sharpenToggle=document.getElementById('sharpen-toggle');
+  const aiNote=document.getElementById('ai-note');
+  const tileGroup=document.getElementById('realesrgan-tile-group');
+  const faceGroup=document.getElementById('realesrgan-face-group');
+  const faceToggle=document.getElementById('face-enhance-toggle');
+
+  if(method==='realesrgan'){
+    lanczosGroup.style.opacity='0.35';
+    compareToggle.checked=false;
+    compareToggle.disabled=true;
+    compareLabel.style.opacity='0.45';
+    sharpenToggle.checked=false;
+    aiNote.style.display='block';
+    if(tileGroup)tileGroup.style.display='block';
+    if(faceGroup)faceGroup.style.display='block';
+  }else{
+    lanczosGroup.style.opacity=method==='bicubic'?'0.35':'1';
+    compareToggle.disabled=false;
+    compareLabel.style.opacity='1';
+    aiNote.style.display='none';
+    if(tileGroup)tileGroup.style.display='none';
+    if(faceGroup)faceGroup.style.display='none';
+    if(faceToggle)faceToggle.checked=false;
+  }
+}
+updateMethodControls(document.querySelector('#method-group .pill.active').dataset.val);
 
 const uploadZone=document.getElementById('upload-zone');
 const fileInput=document.getElementById('file-input');
@@ -500,6 +546,8 @@ document.getElementById('run-btn').addEventListener('click',async()=>{
   fd.append('lanczos_a',document.querySelector('#la-group .pill.active').dataset.val);
   fd.append('sharpen',document.getElementById('sharpen-toggle').checked?'true':'false');
   fd.append('compare',document.getElementById('compare-toggle').checked?'true':'false');
+  fd.append('tile',document.getElementById('tile-size-input')?.value||'0');
+  fd.append('face_enhance',document.getElementById('face-enhance-toggle')?.checked?'true':'false');
   try{
     const resp=await fetch('/api/process',{method:'POST',body:fd});
     if(!resp.ok)throw new Error('Server error '+resp.status);
@@ -565,7 +613,23 @@ function showResults(payload){
   sampImg.src='/api/output/'+ff;
 }
 
-window.addEventListener('load',()=>{VIZ.init()});
+async function loadHardware(){
+  const el=document.getElementById('hw-info');
+  if(!el)return;
+  try{
+    const resp=await fetch('/api/hardware');
+    if(!resp.ok)throw new Error('hardware endpoint '+resp.status);
+    const hw=await resp.json();
+    const dev=hw.device||'cpu';
+    const extra=hw.has_torch?' (torch '+(hw.torch_version||'')+')':'';
+    const cuda=hw.cuda?' · CUDA':'';
+    el.textContent='Hardware: '+dev+cuda+extra;
+  }catch{
+    el.textContent='Hardware: CPU';
+  }
+}
+
+window.addEventListener('load',()=>{VIZ.init(); loadHardware()});
 </script>
 </body>
 </html>
