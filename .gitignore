@@ -24,6 +24,10 @@ output/*
 .vscode/
 .idea/
 
+# Model weights (too large for git)
+models/
+hf_space/models/
+
 # OS
 .DS_Store
 Thumbs.db

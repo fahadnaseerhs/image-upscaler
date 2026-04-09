@@ -13,15 +13,17 @@ Routes:
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import queue
 import sys
 import threading
 import time
 import uuid
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request, send_from_directory
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory, abort
 
 # Make sure the pipeline modules are importable from this directory
 sys.path.insert(0, str(Path(__file__).parent))
@@ -31,6 +33,11 @@ import grid as grid_module
 import interpolation
 import saver
 import enhancer
+import enhancer_remote
+
+# Backend for AI enhancement: "remote" (HF Space) or "local" (on-device).
+# Set via environment variable ENHANCER_BACKEND. Default is "remote".
+ENHANCER_BACKEND = os.environ.get("ENHANCER_BACKEND", "remote").lower()
 
 app = Flask(__name__)
 
@@ -41,6 +48,10 @@ UPLOAD_DIR = Path(__file__).parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
+
+# Maximum pixels (width × height) before auto-downscale to protect RAM/CPU.
+# 2048×2048 = ~4M pixels — safe for CPU-only interpolation & AI enhancement.
+MAX_INPUT_PIXELS = 2048 * 2048
 
 # Latest grid snapshot for the 3D visualization — updated after each run
 _latest_grid_data: dict | None = None
@@ -58,6 +69,26 @@ def _allowed(filename: str) -> bool:
 def _build_sse(event: str, data: dict) -> str:
     """Format a Server-Sent Event string."""
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _downscale_if_needed(input_path: Path) -> Path:
+    """
+    If the uploaded image exceeds MAX_INPUT_PIXELS, downscale it in-place
+    to a safe size before the pipeline runs.  This prevents OOM and 99% CPU
+    usage on very large photographs.
+    """
+    from PIL import Image as PILImage
+    with PILImage.open(input_path) as img:
+        w, h = img.size
+        total = w * h
+        if total <= MAX_INPUT_PIXELS:
+            return input_path
+        ratio = (MAX_INPUT_PIXELS / total) ** 0.5
+        new_w = max(1, int(w * ratio))
+        new_h = max(1, int(h * ratio))
+        img = img.convert("RGB").resize((new_w, new_h), PILImage.LANCZOS)
+        img.save(str(input_path))
+    return input_path
 
 
 def _run_pipeline(
@@ -135,7 +166,8 @@ def _run_pipeline(
             # ── Stage 3: AI enhancement ────────────────────────────────────
             emit("stage", {"stage": 3, "label": "AI enhancement"})
             t0 = time.time()
-            emit("channel", {"method": method, "channel": "all"})
+            backend_label = "remote (HF Space)" if ENHANCER_BACKEND == "remote" else "local"
+            emit("channel", {"method": method, "channel": "all", "backend": backend_label})
             out_name = saver.generate_filename(
                 input_path=input_path,
                 output_dir=str(OUTPUT_DIR),
@@ -143,17 +175,33 @@ def _run_pipeline(
                 scale_factor=scale,
             )
             out_path = OUTPUT_DIR / out_name
-            final_path = enhancer.enhance_with_realesrgan(
+
+            # Choose enhancement backend
+            if ENHANCER_BACKEND == "remote":
+                enhance_fn = enhancer_remote.enhance_with_realesrgan
+            else:
+                enhance_fn = enhancer.enhance_with_realesrgan
+
+            def r_progress_callback(current, total, dt, cpu):
+                emit("realesrgan_progress", {
+                    "current": current,
+                    "total": total,
+                    "dt": round(dt, 3),
+                    "cpu": cpu
+                })
+
+            final_path = enhance_fn(
                 input_path=input_path,
                 output_path=out_path,
                 outscale=scale,
                 tile=realesrgan_tile,
                 face_enhance=face_enhance,
+                progress_callback=r_progress_callback,
             )
             saved_paths[method] = Path(final_path).name
             emit("progress", {
                 "stage": 3,
-                "detail": "Real-ESRGAN done",
+                "detail": f"Real-ESRGAN done ({backend_label})",
                 "elapsed": round(time.time() - t0, 2),
             })
 
@@ -242,6 +290,19 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/favicon.ico")
+def favicon():
+    """Return an inline SVG favicon so browsers stop getting 404."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        '<rect width="100" height="100" rx="20" fill="#6c8bff"/>'
+        '<text x="50" y="72" font-size="60" text-anchor="middle" fill="white">⬡</text>'
+        '</svg>'
+    )
+    return Response(svg, mimetype="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.route("/api/output/<filename>")
 def serve_output(filename: str):
     return send_from_directory(str(OUTPUT_DIR), filename)
@@ -284,6 +345,11 @@ def get_hardware():
     except Exception:
         info["device"] = "cpu"
 
+    # Enhancement backend info
+    info["enhancer_backend"] = ENHANCER_BACKEND
+    if ENHANCER_BACKEND == "remote":
+        info["hf_space_url"] = enhancer_remote.HF_SPACE_URL or "(not configured)"
+
     return jsonify(info)
 
 
@@ -324,26 +390,52 @@ def process():
     input_path = UPLOAD_DIR / unique_name
     f.save(str(input_path))
 
-    # SSE generator — pipeline runs synchronously inside the request thread
-    def generate():
-        queue: list[str] = []
+    # Auto-downscale oversized images to prevent OOM / 99% CPU
+    _downscale_if_needed(input_path)
 
+    # ---------- Live-streaming SSE via background thread + queue ----------
+    # Previously, the pipeline ran synchronously inside the generator and
+    # queued ALL events into a list, yielding them only AFTER the pipeline
+    # finished.  This caused:
+    #   - No live progress on the client (events arrived in one burst)
+    #   - 99% CPU / full RAM usage with no feedback
+    #   - Client timeouts on large images
+    #
+    # Now the pipeline runs in a background thread that pushes events into a
+    # thread-safe queue.  The generator yields each event as soon as it
+    # arrives, giving the client real-time progress.
+    _SENTINEL = object()   # marks end of stream
+    q: queue.Queue = queue.Queue()
+
+    def _worker():
         def emit(event: str, data: dict):
-            queue.append(_build_sse(event, data))
+            q.put(_build_sse(event, data))
 
-        _run_pipeline(
-            input_path=input_path,
-            scale=scale,
-            method=method,
-            lanczos_a=lanczos_a,
-            sharpen=sharpen,
-            compare=compare,
-            realesrgan_tile=tile,
-            face_enhance=face_enhance,
-            emit=emit,
-        )
+        try:
+            _run_pipeline(
+                input_path=input_path,
+                scale=scale,
+                method=method,
+                lanczos_a=lanczos_a,
+                sharpen=sharpen,
+                compare=compare,
+                realesrgan_tile=tile,
+                face_enhance=face_enhance,
+                emit=emit,
+            )
+        except Exception as exc:
+            q.put(_build_sse("error", {"message": str(exc)}))
+        finally:
+            q.put(_SENTINEL)
 
-        for msg in queue:
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+    def generate():
+        while True:
+            msg = q.get()           # blocks until data is available
+            if msg is _SENTINEL:
+                break
             yield msg
 
     return Response(generate(), mimetype="text/event-stream",
