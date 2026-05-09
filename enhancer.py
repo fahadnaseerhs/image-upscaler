@@ -265,3 +265,93 @@ def _get_gfpgan_restorer(model_path: Path):
             bg_upsampler=None,
         )
         return _gfpgan_cache
+
+
+# ---------------------------------------------------------------------------
+# Visualization-enhanced wrapper
+# ---------------------------------------------------------------------------
+
+def enhance_with_visualization(
+    input_path: str | Path,
+    output_dir: Path,
+    outscale: int = 4,
+    tile: int = 0,
+    progress_callback=None,
+) -> Path:
+    """
+    Run Real-ESRGAN on *input_path*, save the enhanced image and the full
+    visualization suite under:
+
+        output_dir/realesrgan/{stem}/
+            00_enhanced_output.png
+            01_filter_responses_64.png
+            02_block_progression_23.png
+            03_frequency_before_after.png
+            04_new_frequencies_generated.png
+            05_radar_summary.png
+
+    Returns the path to the enhanced output image.
+    """
+    import torch
+    import cv2
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    from realesrgan import RealESRGANer
+
+    input_path  = Path(input_path)
+    stem        = input_path.stem
+    viz_dir     = output_dir / "realesrgan" / stem
+    viz_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---- build model (reuse cache if available) ----
+    model_path = Path("models") / "RealESRGAN_x4plus.pth"
+    _download_if_missing(
+        model_path,
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+    )
+
+    with _cache_lock:
+        if 4 not in _upsampler_cache:
+            net = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
+                          num_block=23, num_grow_ch=32, scale=4)
+            _upsampler_cache[4] = RealESRGANer(
+                scale=4, model_path=str(model_path), model=net,
+                tile=tile, tile_pad=10, pre_pad=0,
+                half=torch.cuda.is_available(),
+            )
+        upsampler = _upsampler_cache[4]
+
+    # ---- read input ----
+    img_in_bgr = cv2.imread(str(input_path), cv2.IMREAD_COLOR)
+    if img_in_bgr is None:
+        raise FileNotFoundError(f"Could not read: {input_path}")
+    img_in_rgb = cv2.cvtColor(img_in_bgr, cv2.COLOR_BGR2RGB)
+
+    # ---- enhance ----
+    out_bgr, _ = upsampler.enhance(img_in_bgr, outscale=outscale)
+    img_out_rgb = cv2.cvtColor(out_bgr, cv2.COLOR_BGR2RGB)
+
+    # ---- save enhanced image ----
+    out_img_path = viz_dir / "00_enhanced_output.png"
+    cv2.imwrite(str(out_img_path), out_bgr)
+    print(f"  Saved enhanced image → {out_img_path}")
+
+    # ---- run visualization suite ----
+    try:
+        from graphs.realesrgan_viz import run_visualization_suite
+
+        def _viz_cb(step, total, label):
+            if progress_callback:
+                progress_callback(step, total, 0, 0)
+            print(f"  [VIZ {step}/{total}] {label}")
+
+        run_visualization_suite(
+            model=upsampler,
+            input_np=img_in_rgb,
+            output_np=img_out_rgb,
+            out_dir=viz_dir,
+            progress_cb=_viz_cb,
+        )
+    except Exception as exc:
+        print(f"  WARNING: visualization suite failed ({exc}). Enhanced image still saved.")
+
+    return out_img_path

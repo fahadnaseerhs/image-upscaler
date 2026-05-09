@@ -186,6 +186,16 @@ def parse_args() -> argparse.Namespace:
         help="Run the DSP analysis visualization suite (generates and shows technical graphs).",
     )
     parser.add_argument(
+        "--analyze-esrgan",
+        action="store_true",
+        dest="analyze_esrgan",
+        help=(
+            "Run Real-ESRGAN enhancement and generate the full visualization suite: "
+            "64 filter responses, 23 RRDB block progression, FFT before/after, "
+            "new-frequency map, and radar summary. Saves to output/realesrgan/<stem>/"
+        ),
+    )
+    parser.add_argument(
         "--backend",
         choices=["local", "remote", "colab"],
         default="local",
@@ -383,6 +393,25 @@ def run_pipeline(args: argparse.Namespace) -> None:
             print_result("Saved to", str(final_path))
         except Exception as exc:
             print_error(f"Local AI processing failed: {exc}")
+        return
+
+    if getattr(args, "analyze_esrgan", False):
+        print_stage(1, "Real-ESRGAN + Visualization Suite")
+        t0 = time.time()
+        import enhancer
+        out_root = Path(args.output)
+        out_root.mkdir(parents=True, exist_ok=True)
+        try:
+            final_path = enhancer.enhance_with_visualization(
+                input_path=args.input,
+                output_dir=out_root,
+                outscale=args.scale,
+                tile=0,
+            )
+            print_result("Suite done", f"({time.time()-t0:.2f}s)")
+            print_result("Output folder", str(Path(args.output) / "realesrgan" / Path(args.input).stem))
+        except Exception as exc:
+            print_error(f"Visualization suite failed: {exc}")
         return
 
     # ------------------------------------------------------------------
