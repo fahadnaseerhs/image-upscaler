@@ -1,175 +1,312 @@
-# 🔬 Image Upscaler
+# Image Enhancer
 
-A Python-based image upscaling pipeline that reconstructs high-resolution images from low-resolution sources using **Bicubic** and **Lanczos** interpolation algorithms. Features both a command-line interface and a stunning web UI with real-time 3D visualization powered by Three.js.
+A full-stack image enhancement pipeline combining classical Digital Signal Processing (DSP) interpolation algorithms with AI super-resolution (Real-ESRGAN). Features a Flask web UI with real-time 3D visualization, a CLI, and a Google Colab GPU worker for remote processing and on-GPU visualization.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-Web_UI-000000?logo=flask)
 ![Three.js](https://img.shields.io/badge/Three.js-3D_Viz-black?logo=three.js)
+![Real-ESRGAN](https://img.shields.io/badge/Real--ESRGAN-AI_SR-ff6b35)
+![Colab](https://img.shields.io/badge/Google_Colab-GPU_Worker-F9AB00?logo=googlecolab)
 
 ---
 
-## ✨ Features
+## What It Does
 
-- **Bicubic Interpolation** — 4×4 neighborhood, Keys' cubic kernel via SciPy
-- **Lanczos Interpolation** — Windowed sinc kernel (a=2 or a=3) via Pillow
-- **Multiple Scale Factors** — 2×, 4×, or 8× upscaling
-- **Post-Processing Sharpening** — Optional UnsharpMask to recover edge crispness
-- **AI Enhancement (Optional)** — Real-ESRGAN model for true detail enhancement
-- **Compare Mode** — Run both algorithms side-by-side with a difference map
-- **Web UI** — Dark-themed glassmorphism interface with drag-and-drop upload
-- **3D Visualization** — Real-time Three.js animation showing the decoding pipeline:
-  - Stage 1: Uploaded image rendered as colored 3D cubes
-  - Stage 2: Cubes dissolve into a sparse grid with NaN wireframes
-  - Stage 3: Interpolation fills empty positions with animated vectors
-- **Live Progress Streaming** — Server-Sent Events (SSE) for real-time pipeline feedback
-- **CLI Mode** — Full command-line interface with progress reporting and visualization
+Takes a low-resolution or degraded image and reconstructs a high-resolution version using one of three methods:
+
+| Method | Type | Quality | Speed |
+|---|---|---|---|
+| **Bicubic** | Classical DSP — Keys' cubic kernel | Good | Fast (CPU) |
+| **Lanczos** | Classical DSP — windowed sinc kernel | Better | Fast (CPU) |
+| **Real-ESRGAN** | AI super-resolution — RRDBNet | Best | Slow (needs GPU) |
+
+Scale factors: **2×, 4×, 8×**
 
 ---
 
-## 📦 Requirements
-
-### Python Packages
-
-| Package      | Purpose                                |
-|--------------|----------------------------------------|
-| `flask`      | Web server and API routes              |
-| `numpy`      | Array operations, grid math            |
-| `pillow`     | Image I/O, Lanczos resize, sharpening  |
-| `scipy`      | Bicubic interpolation (map_coordinates)|
-| `matplotlib` | CLI visualizations and compare plots   |
-| `torch` + `torchvision` | Real-ESRGAN inference backend (optional) |
-| `realesrgan` + `basicsr` | AI model loader/runtime (optional) |
-| `opencv-python` | Image conversion for Real-ESRGAN I/O (optional) |
-
-### Install
-
-```bash
-pip install flask numpy pillow scipy matplotlib
-```
-
-### Optional AI Enhancer Dependencies (Real-ESRGAN)
-
-```bash
-pip install torch torchvision realesrgan basicsr opencv-python gfpgan
-```
-
----
-
-## 🚀 Getting Started
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/fahadnaseerhs/image-upscaler.git
-cd image-upscaler
-```
-
-### 2. Install Dependencies
-
-```bash
-pip install flask numpy pillow scipy matplotlib
-```
-
-### 3. Run the Web UI
-
-```bash
-python app.py
-```
-
-Open **http://localhost:5000** in your browser.
-
-### 4. Or Use the CLI
-
-```bash
-python main.py --input photo.jpg
-```
-
----
-
-## 🖥️ Web UI Usage
-
-1. **Upload** an image (PNG, JPEG, BMP, TIFF, WebP)
-2. **Configure** parameters:
-   - Scale factor: `2×`, `4×`, or `8×`
-   - Method: `Bicubic`, `Lanczos`, or `AI (Real-ESRGAN)`
-   - Lanczos window: `a=2` (fast) or `a=3` (sharp)
-   - Toggle **Sharpen** or **Compare** mode
-   - In AI mode you can set a Real-ESRGAN `tile` size and optionally enable face restoration (GFPGAN)
-3. Click **Run Pipeline** and watch the 3D visualization
-4. **Download** the upscaled result from the results panel
-
----
-
-## ⌨️ CLI Commands
-
-### Web Server (`app.py`)
-
-Run the web UI — the **Execution Backend** is chosen interactively in the browser UI itself, no flags needed.
-
-```bash
-python app.py
-```
-
-Open `http://localhost:5000`, select your backend (`Local CPU/GPU`, `Hugging Face`, or `Google Colab`) and paste in your Colab/remote URL if needed.
-
-### Pipeline Processing (`main.py`)
-
-| Command | Description |
-|---------|-------------|
-| `python main.py -i photo.jpg` | Basic 2× Lanczos upscale (default) |
-| `python main.py -i photo.jpg -m bicubic -s 4` | Bicubic 4× upscale locally |
-| `python main.py -i photo.jpg -m lanczos --lanczos-a 2` | Lanczos with window a=2 (faster) |
-| `python main.py -i photo.jpg -m realesrgan -s 4` | Real-ESRGAN AI upscale locally |
-| `python main.py -i photo.jpg --compare` | Compare both Bicubic and Lanczos side-by-side |
-| `python main.py -i photo.jpg --sharpen` | Apply UnsharpMask post-processing |
-| `python main.py -i photo.jpg --visualize` | Show animated grid visualizations |
-| `python main.py -i photo.jpg --analyze-dsp` | Run the DSP analysis visualization suite |
-| `python main.py -i photo.jpg -q` | Quiet mode (minimal console output) |
-| `python main.py -i photo.jpg -m realesrgan --backend remote` | Offload to Hugging Face Space |
-| `python main.py -i photo.jpg -m lanczos -s 4 --backend colab --remote-url https://xxxx.gradio.live` | Offload to Google Colab GPU |
-
-#### Backend Flags
-
-| Flag | Options | Description |
-|------|---------|-------------|
-| `--backend` | `local` *(default)*, `remote`, `colab` | Where to run the processing |
-| `--remote-url` | any URL | Colab `gradio.live` or custom HF URL. Leave blank for default HF Space. |
-
-*Run `python main.py --help` to see the full argument list.*
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```
-image-upscaler/
-├── app.py              # Flask web server with SSE streaming
-├── main.py             # CLI entry point and pipeline orchestrator
-├── loader.py           # Image loading, validation, normalization
-├── grid.py             # Sparse grid creation and pixel mapping
-├── interpolation.py    # Bicubic & Lanczos interpolation engines
-├── saver.py            # Denormalization, merging, sharpening, saving
+image-enhancer/
+├── app.py                  # Flask web server with SSE live streaming
+├── main.py                 # CLI entry point and pipeline orchestrator
+├── loader.py               # Image loading, validation, channel splitting, normalization
+├── grid.py                 # Sparse grid creation — upsampling step (DSP)
+├── interpolation.py        # Bicubic & Lanczos interpolation engines
+├── saver.py                # Denormalization, channel merging, sharpening, PNG export
+├── enhancer.py             # Local Real-ESRGAN inference (CPU/GPU)
+├── enhancer_remote.py      # Remote Real-ESRGAN via Colab or HF Space
+├── colab_worker.py         # Colab GPU worker script — /enhance + /analyze endpoints
+├── colab_worker.ipynb      # Colab notebook launcher
+├── graphs/
+│   ├── realesrgan_viz.py   # Real-ESRGAN visualization suite (6 plots)
+│   ├── spatial_domain.py   # Spatial domain before/after + diff + zoom
+│   ├── frequency_domain.py # FFT frequency analysis
+│   ├── kernel_plot.py      # Interpolation kernel shape visualization
+│   ├── weighted_sum.py     # Weighted sum computation diagram
+│   ├── radar_chart.py      # Algorithm comparison radar chart
+│   ├── antialiasing.py     # Anti-aliasing property visualization
+│   └── uint8_to_float.py   # Normalization step visualization
 ├── templates/
-│   └── index.html      # Web UI (Three.js 3D visualization)
-├── uploads/            # Temporary uploaded images
-├── output/             # Generated upscaled images
-└── README.md
+│   └── index.html          # Web UI — Three.js 3D visualization
+├── hf_space/
+│   ├── app.py              # Hugging Face Space Gradio app
+│   └── requirements.txt
+├── models/                 # Model weights (auto-downloaded)
+├── uploads/                # Temporary uploaded images
+└── output/                 # Generated output images and plots
 ```
 
 ---
 
-## 🔧 How It Works
+## DSP Pipeline
 
 The pipeline processes images through 5 stages:
 
-1. **Load** — Read image, validate, split into R/G/B channels, normalize to `[0.0, 1.0]`
-2. **Grid** — Create a larger sparse grid (`H×scale`, `W×scale`), place known pixels at `scale`-spaced positions (rest = NaN)
-3. **Interpolate** — Fill every NaN position using weighted sums of neighboring known pixels
-4. **Save** — Denormalize back to `[0, 255]`, merge channels, optionally sharpen, write PNG
-5. **Complete** — Display summary with output path and timing
+```
+Input Image
+    │
+    ▼
+[1] LOAD — Read file, validate, split into R/G/B channels, normalize to [0.0, 1.0]
+    │
+    ▼
+[2] GRID — Create sparse grid (H×scale, W×scale), place known pixels at scale-spaced
+           positions, fill rest with NaN  ← DSP upsampling by factor L
+    │
+    ▼
+[3] INTERPOLATE — Fill every NaN using weighted kernel sums of neighboring pixels
+                  Bicubic: Keys' piecewise cubic, 4×4 neighborhood
+                  Lanczos: windowed sinc, 6×6 neighborhood (a=3)
+    │
+    ▼
+[4] SAVE — Denormalize [0,1] → [0,255], merge channels, optional UnsharpMask, write PNG
+    │
+    ▼
+[5] COMPLETE
+```
 
 ---
 
-## 📄 License
+## Installation
 
-This project is open source and available for educational and personal use.
+### Core (classical methods only)
+
+```bash
+pip install flask numpy pillow scipy matplotlib
+```
+
+### With AI Enhancement (Real-ESRGAN)
+
+```bash
+pip install flask numpy pillow scipy matplotlib
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+pip install basicsr realesrgan opencv-python
+```
+
+### Optional
+
+```bash
+pip install gfpgan          # face restoration
+pip install gradio-client   # remote Colab/HF backend
+pip install psutil          # live CPU/RAM monitoring
+```
+
+---
+
+## Web UI
+
+```bash
+python app.py
+```
+
+Open `http://localhost:5000`
+
+**Features:**
+- Drag-and-drop image upload
+- Scale factor: 2×, 4×, 8×
+- Method: Bicubic, Lanczos, AI (Real-ESRGAN)
+- Execution backend: Local CPU/GPU, Hugging Face Space, Google Colab GPU
+- Real-time 3D visualization (Three.js) showing the pipeline stages
+- Live progress streaming via Server-Sent Events (SSE)
+- Before/after comparison slider
+
+---
+
+## CLI
+
+```bash
+# Basic 2× Lanczos upscale
+python main.py --input photo.jpg
+
+# Bicubic 4× upscale
+python main.py --input photo.jpg --method bicubic --scale 4
+
+# Lanczos 8× with sharpening
+python main.py --input photo.jpg --scale 8 --sharpen
+
+# Compare Bicubic vs Lanczos side-by-side
+python main.py --input photo.jpg --compare
+
+# Real-ESRGAN locally
+python main.py --input photo.jpg --method realesrgan --scale 4
+
+# Real-ESRGAN on Colab GPU
+python main.py --input photo.jpg --method realesrgan --scale 4 \
+    --backend colab --remote-url https://xxxx.gradio.live
+
+# Full ESRGAN visualization suite (6 plots)
+python main.py --input photo.jpg --analyze-esrgan --scale 4
+
+# Full ESRGAN viz on Colab GPU
+python main.py --input photo.jpg --analyze-esrgan --scale 4 \
+    --backend colab --remote-url https://xxxx.gradio.live
+
+# DSP analysis plots (classical methods)
+python main.py --input photo.jpg --analyze-dsp
+
+# Both analyses together
+python main.py --input photo.jpg --analyze-esrgan --analyze-dsp --scale 4 \
+    --backend colab --remote-url https://xxxx.gradio.live
+```
+
+### CLI Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input`, `-i` | required | Input image path |
+| `--output`, `-o` | `./output` | Output directory |
+| `--scale`, `-s` | `2` | Upscale factor: 2, 4, or 8 |
+| `--method`, `-m` | `lanczos` | `bicubic`, `lanczos`, or `realesrgan` |
+| `--lanczos-a` | `3` | Lanczos window size: 2 (fast) or 3 (sharp) |
+| `--sharpen` | off | Apply UnsharpMask post-processing |
+| `--compare` | off | Run both Bicubic and Lanczos, show diff map |
+| `--visualize` | off | Show animated grid/interpolation visualizations |
+| `--analyze-esrgan` | off | Generate full Real-ESRGAN visualization suite |
+| `--analyze-dsp` | off | Generate DSP analysis plots |
+| `--tile` | `0` | Real-ESRGAN tile size in pixels (0 = full image) |
+| `--face-enhance` | off | GFPGAN face restoration after Real-ESRGAN |
+| `--backend` | `local` | `local`, `remote` (HF Space), or `colab` |
+| `--remote-url` | — | Colab `gradio.live` URL or HF Space name |
+| `--quiet`, `-q` | off | Suppress progress output |
+
+---
+
+## Google Colab GPU Worker
+
+Use Colab's free T4 GPU for Real-ESRGAN when you don't have a local GPU.
+
+### Setup
+
+**1. Open Colab and set GPU runtime**
+
+Go to [colab.google.com](https://colab.google.com) → open `colab_worker.ipynb` → `Runtime → Change runtime type → T4 GPU`
+
+**2. Upload `graphs/` folder to Google Drive**
+
+Upload the `graphs/` folder to the root of your Google Drive (`My Drive/graphs/`).
+
+**3. Mount Drive and copy graphs (run in a Colab cell)**
+
+```python
+from google.colab import drive
+drive.mount('/content/drive')
+import shutil
+shutil.copytree('/content/drive/MyDrive/graphs', '/content/graphs')
+print('Done')
+```
+
+**4. Upload `colab_worker.py` to Colab Files panel and run**
+
+```python
+!python colab_worker.py
+```
+
+**5. Copy the `gradio.live` URL from the output**
+
+### Colab Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `/enhance` | Standard enhancement — returns upscaled image |
+| `/analyze` | Enhancement + all 6 visualization plots on GPU → returns zip file |
+
+### Using `/analyze` (browser)
+
+Open the `gradio.live` URL → **Analyze tab** → upload image → set scale/tile → **Run Full Analysis on GPU** → download zip from Colab Files panel (`/content/results/`)
+
+### Using `/enhance` (CLI)
+
+```bash
+python main.py --input photo.jpg --scale 4 \
+    --backend colab --remote-url https://xxxx.gradio.live
+```
+
+---
+
+## Real-ESRGAN Visualization Suite
+
+Running `--analyze-esrgan` generates 6 diagnostic plots saved to `output/realesrgan/<image_name>/`:
+
+| File | Description |
+|---|---|
+| `00_enhanced_output.png` | The upscaled image |
+| `01_filter_responses_64.png` | All 64 first-layer kernel weights (3×3 patches, RdBu colormap) |
+| `01_filter_responses_top16.png` | Top 16 most active feature maps by variance |
+| `02_block_progression_23.png` | 23 RRDB block activations + energy/variance chart (twin y-axis) |
+| `03_frequency_before_after.png` | 2D FFT: input vs output vs difference spectrum |
+| `04_new_frequencies_generated.png` | Radial frequency profile (log scale) + spatial diff heatmap + histogram |
+| `05_radar_summary.png` | 5-metric radar: sharpness, high-freq energy, detail gain, noise, edge strength |
+| `06_tiling_grid_diagram.png` | Tiling parameters and processing stats |
+
+---
+
+## DSP Concepts Used
+
+| Concept | Where |
+|---|---|
+| Discrete 2D signal | Image as pixel array |
+| Signal normalization | `loader.py` — uint8 → float64 |
+| Upsampling by factor L | `grid.py` — sparse grid with NaN placeholders |
+| Reconstruction filter | `interpolation.py` — both algorithms |
+| Piecewise cubic filter (Keys') | Bicubic interpolation via SciPy `map_coordinates` |
+| Ideal sinc / windowed sinc | Lanczos interpolation via PIL `Image.LANCZOS` |
+| Filter separability | 2D weight = w_row × w_col |
+| Ringing artifact | Lanczos negative side-lobes, clipped in `saver.py` |
+| High-frequency emphasis | UnsharpMask post-processing |
+| Learned non-linear filter | Real-ESRGAN (23-stage RRDBNet) |
+| Block/overlap-add processing | Real-ESRGAN tiling with `tile_pad=10` |
+
+---
+
+## Output Files
+
+```
+output/
+├── <name>_lanczos_4x.png           # Classical upscale result
+├── <name>_bicubic_4x.png           # Classical upscale result
+└── realesrgan/
+    └── <name>/
+        ├── 00_enhanced_output.png
+        ├── 01_filter_responses_64.png
+        ├── 01_filter_responses_top16.png
+        ├── 02_block_progression_23.png
+        ├── 03_frequency_before_after.png
+        ├── 04_new_frequencies_generated.png
+        ├── 05_radar_summary.png
+        └── 06_tiling_grid_diagram.png
+```
+
+---
+
+## Requirements
+
+- Python 3.10+
+- See installation section above for package requirements
+- GPU recommended for Real-ESRGAN (or use Colab worker)
+- Google Colab free tier (T4 GPU) supported
+
+---
+
+## License
+
+Open source — available for educational and personal use.

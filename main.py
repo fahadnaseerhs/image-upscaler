@@ -97,117 +97,281 @@ def parse_args() -> argparse.Namespace:
     All defaults are chosen to produce good results for a first-time user
     running the script without reading documentation.
     """
+
+    DESCRIPTION = """\
+╔══════════════════════════════════════════════════════════════════════╗
+║             ANTIGRAVITY — Image Enhancement Pipeline               ║
+╠══════════════════════════════════════════════════════════════════════╣
+║  Reconstruct high-resolution images from low-res / pixelated       ║
+║  sources using classical interpolation or AI super-resolution.     ║
+║                                                                    ║
+║  Supported methods:                                                ║
+║    • lanczos    — Lanczos sinc interpolation (classical, fast)      ║
+║    • bicubic    — Bicubic spline interpolation (classical, fast)    ║
+║    • realesrgan — Real-ESRGAN deep neural network (AI, slow/GPU)   ║
+║                                                                    ║
+║  Backends:                                                         ║
+║    • local  — runs on this machine (CPU or GPU)                    ║
+║    • colab  — offloads AI work to a Google Colab GPU               ║
+║    • remote — offloads to a Hugging Face Space                     ║
+╚══════════════════════════════════════════════════════════════════════╝"""
+
+    EPILOG = """\
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Basic upscale (Lanczos 2x, default):
+    python main.py -i photo.jpg
+
+  Bicubic 4x upscale:
+    python main.py -i photo.jpg -m bicubic -s 4
+
+  AI upscale with Real-ESRGAN (local GPU/CPU):
+    python main.py -i photo.jpg -m realesrgan -s 4
+
+  AI upscale via Colab GPU (no local GPU needed):
+    python main.py -i photo.jpg -s 4 --backend colab --remote-url https://xxxx.gradio.live
+
+  Full AI visualization suite (64 filters, 23 blocks, FFT, radar):
+    python main.py -i photo.jpg --analyze-esrgan -s 4
+
+  Full AI viz via Colab GPU (enhancement + features on Colab, plots locally):
+    python main.py -i photo.jpg --analyze-esrgan -s 4 --backend colab --remote-url https://xxxx.gradio.live
+
+  DSP analysis (kernel shapes, weighted sums, frequency response):
+    python main.py -i photo.jpg --analyze-dsp
+
+  Compare Bicubic vs Lanczos side-by-side:
+    python main.py -i photo.jpg --compare
+
+  Compare with visualizations + sharpening:
+    python main.py -i photo.jpg --compare --visualize --sharpen
+
+  Quiet mode (suppress progress, show only result path):
+    python main.py -i photo.jpg -q
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COLAB GPU WORKFLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  If you don't have a local GPU, use Google Colab for free:
+
+  1. Open colab.google.com → new notebook → Runtime → T4 GPU
+  2. Cell 1: !pip install -q gradio torch torchvision basicsr-fixed realesrgan
+  3. Upload colab_worker.py to Colab's Files panel (folder icon on left)
+  4. Cell 2: !python colab_worker.py
+     → Cell stays spinning (that means GPU server is alive)
+     → Copy the https://xxxx.gradio.live URL from the output
+  5. On your PC, run:
+     python main.py -i photo.jpg --analyze-esrgan -s 4 \\
+         --backend colab --remote-url https://PASTE_URL_HERE.gradio.live
+
+  NOTE: Your image is sent to Colab automatically over the internet.
+        You do NOT need to upload images to Colab manually.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Standard upscale:
+    output/<method>_<scale>x_<filename>.png
+
+  --analyze-esrgan generates (in output/realesrgan/<name>/):
+    00_enhanced_output.png        — the 4x upscaled image
+    01_filter_responses_64.png    — 64 first-layer filter activations
+    02_block_progression_23.png   — 23 RRDB block energy progression
+    03_frequency_before_after.png — 2D FFT: input vs output vs new
+    04_new_frequencies_generated.png — radial profile + spatial diff
+    05_radar_summary.png          — 8-band frequency radar chart
+    06_tiling_grid_diagram.png    — tile grid + processing stats
+
+  --analyze-dsp generates (in output/dsp_analysis/):
+    kernel shape, weighted sum, frequency response, diff map, radar
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IMPORTANT NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  • Real-ESRGAN on CPU is VERY slow (10+ min for a 512px image).
+    Use --backend colab for free GPU access.
+  • --analyze-esrgan forces method=realesrgan regardless of --method.
+  • --compare only applies to classical methods (bicubic vs lanczos).
+  • Colab gradio.live URLs expire after ~72 hours. Re-run the notebook
+    to get a new URL.
+  • The web UI (python app.py) provides a browser interface for all
+    the same features.
+"""
+
     parser = argparse.ArgumentParser(
         prog="main.py",
-        description=(
-            "Image Decoding Pipeline — reconstruct a high-resolution image "
-            "from a pixelated (undersampled) source using Bicubic or Lanczos "
-            "interpolation."
-        ),
+        description=DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Examples:\n"
-            "  python main.py --input photo.jpg\n"
-            "  python main.py --input photo.jpg --method bicubic --scale 4\n"
-            "  python main.py --input photo.jpg --compare --visualize\n"
-            "  python main.py --input photo.jpg --scale 2 --quiet"
-        ),
+        epilog=EPILOG,
     )
 
-    parser.add_argument(
+    # ── Core arguments ────────────────────────────────────────────────────
+    core = parser.add_argument_group("Core Options")
+    core.add_argument(
         "--input", "-i",
         required=True,
         metavar="PATH",
-        help="Path to the input (degraded) image file. Supports PNG, JPEG, BMP, TIFF.",
+        help="Path to the input image. Supports PNG, JPEG, BMP, TIFF, WEBP.",
     )
-    parser.add_argument(
+    core.add_argument(
         "--output", "-o",
         default="./output",
         metavar="DIR",
-        help="Output directory. Created automatically if missing.  [default: ./output]",
+        help="Output directory. Created if missing.  [default: ./output]",
     )
-    parser.add_argument(
+    core.add_argument(
         "--scale", "-s",
         type=int,
         default=2,
         choices=VALID_SCALES,
-        metavar="SCALE",
-        help=f"Integer upscale factor. Valid: {VALID_SCALES}.  [default: 2]",
+        metavar="N",
+        help=f"Upscale factor. Valid: {VALID_SCALES}.  [default: 2]",
     )
-    parser.add_argument(
+
+    # ── Enhancement method ────────────────────────────────────────────────
+    method_grp = parser.add_argument_group("Enhancement Method")
+    method_grp.add_argument(
         "--method", "-m",
         default="lanczos",
         metavar="METHOD",
-        help=f"Interpolation algorithm. Valid: {VALID_METHODS}.  [default: lanczos]",
+        help=(
+            f"Interpolation method. Valid: {VALID_METHODS}.\n"
+            "  lanczos    = windowed sinc (sharpest classical method)\n"
+            "  bicubic    = cubic spline (smoother, fewer artifacts)\n"
+            "  realesrgan = AI super-resolution (best quality, needs GPU)\n"
+            "[default: lanczos]"
+        ),
     )
-    parser.add_argument(
+    method_grp.add_argument(
         "--lanczos-a",
         type=int,
         default=3,
         dest="lanczos_a",
         metavar="A",
-        help="Lanczos window size (2 or 3). Ignored when --method bicubic.  [default: 3]",
+        help="Lanczos window size (2 or 3). Only used with --method lanczos.  [default: 3]",
     )
-    parser.add_argument(
-        "--visualize",
-        action="store_true",
-        help="Show animated grid-mapping and interpolation visualizations inline.",
-    )
-    parser.add_argument(
-        "--save-channels",
-        action="store_true",
-        dest="save_channels",
-        help="Also save R, G, B as separate grayscale PNGs (debug mode).",
-    )
-    parser.add_argument(
-        "--compare",
-        action="store_true",
-        help=(
-            "Run both Bicubic and Lanczos, save both outputs, and show a "
-            "side-by-side comparison. Overrides --method."
-        ),
-    )
-    parser.add_argument(
+    method_grp.add_argument(
         "--sharpen",
         action="store_true",
+        help="Apply UnsharpMask after upscaling to restore edge crispness.",
+    )
+    method_grp.add_argument(
+        "--tile",
+        type=int,
+        default=0,
+        metavar="PX",
         help=(
-            "Apply UnsharpMask after interpolation to recover edge crispness. "
-            "Recommended — bicubic/Lanczos upscaling inherently softens edges."
+            "Tile size for Real-ESRGAN VRAM management (pixels).\n"
+            "  0   = process entire image at once (fastest, needs most VRAM)\n"
+            "  128 = small tiles (low VRAM, slower)\n"
+            "  256 = medium tiles (balanced)\n"
+            "  512 = large tiles (fast, needs more VRAM)\n"
+            "[default: 0]"
         ),
     )
-    parser.add_argument(
-        "--quiet", "-q",
+    method_grp.add_argument(
+        "--face-enhance",
         action="store_true",
-        help="Suppress all progress output except the final saved path.",
+        dest="face_enhance",
+        help=(
+            "Enable GFPGAN face restoration after Real-ESRGAN upscaling.\n"
+            "Improves facial details (eyes, teeth, skin) in portrait photos.\n"
+            "Requires gfpgan package on the backend."
+        ),
     )
-    parser.add_argument(
-        "--analyze-dsp",
-        action="store_true",
-        help="Run the DSP analysis visualization suite (generates and shows technical graphs).",
+
+    # ── Backend / remote ──────────────────────────────────────────────────
+    backend_grp = parser.add_argument_group(
+        "Backend (where AI processing runs)",
+        "Controls whether processing happens locally or on a remote GPU.\n"
+        "Only relevant for realesrgan and --analyze-esrgan."
     )
-    parser.add_argument(
+    backend_grp.add_argument(
+        "--backend",
+        choices=["local", "remote", "colab"],
+        default="local",
+        help=(
+            "Where to run AI processing.\n"
+            "  local  = this machine's CPU/GPU  [default]\n"
+            "  colab  = Google Colab GPU (needs --remote-url)\n"
+            "  remote = Hugging Face Space"
+        ),
+    )
+    backend_grp.add_argument(
+        "--remote-url",
+        default="",
+        metavar="URL",
+        help=(
+            "Public URL of the Colab worker or HF Space.\n"
+            "  For Colab: the https://xxxx.gradio.live URL from colab_worker.py\n"
+            "  For HF:    your HF Space URL (e.g. username/space-name)"
+        ),
+    )
+
+    # ── Visualization & analysis ──────────────────────────────────────────
+    viz_grp = parser.add_argument_group(
+        "Visualization & Analysis",
+        "Generate diagnostic plots and technical analysis."
+    )
+    viz_grp.add_argument(
         "--analyze-esrgan",
         action="store_true",
         dest="analyze_esrgan",
         help=(
-            "Run Real-ESRGAN enhancement and generate the full visualization suite: "
-            "64 filter responses, 23 RRDB block progression, FFT before/after, "
-            "new-frequency map, and radar summary. Saves to output/realesrgan/<stem>/"
+            "Run Real-ESRGAN + generate full visualization suite:\n"
+            "  • 64 first-layer filter response maps (classified by type)\n"
+            "  • 23 RRDB block activation progression + energy deltas\n"
+            "  • 2D FFT frequency analysis (before / after / new)\n"
+            "  • Radial frequency profile + spatial diff heatmap\n"
+            "  • 8-band frequency radar chart with %% gain labels\n"
+            "  • Tiling grid diagram with processing stats\n"
+            "Saves all plots to output/realesrgan/<image_name>/"
         ),
     )
-    parser.add_argument(
-        "--backend",
-        choices=["local", "remote", "colab"],
-        default="local",
-        help="Backend device for execution (local, remote, or colab). Default: local"
+    viz_grp.add_argument(
+        "--analyze-dsp",
+        action="store_true",
+        help=(
+            "Run DSP analysis suite for classical methods:\n"
+            "  • Kernel shape visualization\n"
+            "  • Weighted sum computation diagram\n"
+            "  • Frequency domain response\n"
+            "  • Spatial difference map\n"
+            "  • Comparative radar chart"
+        ),
     )
-    parser.add_argument(
-        "--remote-url",
-        default="",
-        help="Public URL of the remote Hugging Face space or Colab ngrok instance."
+    viz_grp.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Show animated grid-mapping and interpolation visualizations inline.",
+    )
+    viz_grp.add_argument(
+        "--compare",
+        action="store_true",
+        help="Run both Bicubic and Lanczos, save both, show side-by-side comparison.",
+    )
+
+    # ── Output control ────────────────────────────────────────────────────
+    out_grp = parser.add_argument_group("Output Control")
+    out_grp.add_argument(
+        "--save-channels",
+        action="store_true",
+        dest="save_channels",
+        help="Save R, G, B channels as separate grayscale PNGs (debug mode).",
+    )
+    out_grp.add_argument(
+        "--quiet", "-q",
+        action="store_true",
+        help="Suppress all progress output except the final saved path.",
     )
 
     return parser.parse_args()
+
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +517,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
     # analyze-esrgan: enhance via any backend, then run full viz suite
     # ------------------------------------------------------------------
     if getattr(args, "analyze_esrgan", False):
+        # Force realesrgan method — this flag is specifically for AI analysis
+        args.method = "realesrgan"
 
         import cv2
         import enhancer as _enh
@@ -366,38 +532,38 @@ def run_pipeline(args: argparse.Namespace) -> None:
         viz_dir  = out_root / "realesrgan" / stem
         viz_dir.mkdir(parents=True, exist_ok=True)
 
-        # ── Step 1: Enhancement + feature extraction ──────────────────────────
+        # ── Step 1: Enhancement ─────────────────────────────────────────────
         if args.backend != "local":
-            # ── ALL AI work on Colab GPU ──────────────────────────────────────
-            print_stage(1, f"Colab GPU: Enhancement + Hook Feature Extraction")
+            # Colab GPU does the heavy 4× upscaling
+            print_stage(1, f"Colab GPU: Enhancement (4× upscale)")
             import enhancer_remote
             out_path = viz_dir / "00_enhanced_output.png"
-            npz_path = viz_dir / "features.npz"
             try:
-                feats = enhancer_remote.enhance_and_extract(
+                enhancer_remote.enhance_with_realesrgan(
                     input_path=args.input,
                     output_path=out_path,
-                    npz_path=npz_path,
                     outscale=args.scale,
-                    tile=0,
+                    tile=getattr(args, "tile", 0),
+                    face_enhance=getattr(args, "face_enhance", False),
                     remote_url=getattr(args, "remote_url", ""),
+                    method=args.method,
                 )
-                print_result("Colab GPU", f"Enhancement + features done ({time.time()-t0:.2f}s)")
-                # feats = dict loaded from npz: {"conv_first": arr, "block_0"..arr}
+                print_result("Colab GPU", f"Enhancement done ({time.time()-t0:.2f}s)")
             except Exception as exc:
-                print_error(f"Remote enhancement/extraction failed: {exc}")
+                print_error(f"Remote enhancement failed: {exc}")
                 return
 
-            # Build stub upsampler-like object just to carry weights for viz
+            # Load model on CPU for diagnostic hooks only (NOT re-doing upscale)
+            # This is a lightweight forward pass on the small INPUT image
+            print_note("Loading model on CPU for visualization hooks (not re-upscaling) …")
             try:
-                import torch
+                import torch, urllib.request
                 from basicsr.archs.rrdbnet_arch import RRDBNet
                 from realesrgan import RealESRGANer
-                import urllib.request
                 model_path = Path("models") / "RealESRGAN_x4plus.pth"
                 model_path.parent.mkdir(parents=True, exist_ok=True)
                 if not model_path.exists():
-                    print_note("Downloading weights for filter classification only …")
+                    print_note("Downloading RealESRGAN_x4plus.pth …")
                     urllib.request.urlretrieve(
                         "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
                         str(model_path))
@@ -406,10 +572,11 @@ def run_pipeline(args: argparse.Namespace) -> None:
                 upsampler = RealESRGANer(scale=4, model_path=str(model_path), model=net,
                                          tile=0, tile_pad=10, pre_pad=0, half=False,
                                          device=torch.device("cpu"))
-                print_result("Weights loaded", "CPU (for filter labels only — no forward pass)")
+                print_result("Model loaded", "CPU (for viz hooks only)")
             except Exception as exc:
-                print_note(f"Weight load failed ({exc}) — filter-type labels skipped.")
+                print_note(f"Model load failed ({exc}) — filter/block plots skipped.")
                 upsampler = None
+
 
         else:
             # ── Local GPU/CPU ──────────────────────────────────────────────────
@@ -454,15 +621,43 @@ def run_pipeline(args: argparse.Namespace) -> None:
                 input_np=img_in_np,
                 output_np=img_out_np,
                 out_dir=viz_dir,
-                preloaded_feats=feats,     # None → hooks run locally; dict → use Colab feats
             )
         except Exception as exc:
-            print_note(f"Visualization error: {exc} — enhanced image still saved.")
+            import traceback
+            print(f"\n  ERROR in visualization suite: {exc}")
+            traceback.print_exc()
+            print("  Enhanced image was saved. Plots may be partial.")
 
 
 
         print_result("Suite done", f"{time.time()-t0:.2f}s total")
         print_result("Output dir", str(viz_dir))
+
+        # ── Also run DSP analysis if requested alongside --analyze-esrgan ──────
+        if getattr(args, "analyze_dsp", False):
+            print_stage(3, "DSP analysis …")
+            try:
+                # DSP analysis needs interpolated channels — run lanczos quickly
+                r_n, g_n, b_n, _ = loader.prepare_image(args.input)
+                r_sp, g_sp, b_sp, _ = grid.prepare_all_channels(r_n, g_n, b_n, args.scale)
+                r_f, g_f, b_f = interpolation.interpolate_all_channels(
+                    r_sp, g_sp, b_sp, r_n, g_n, b_n,
+                    scale_factor=args.scale, method="lanczos",
+                )
+                graphs.run_analysis(
+                    method="lanczos",
+                    r_orig=r_n, g_orig=g_n, b_orig=b_n,
+                    r_filled=r_f, g_filled=g_f, b_filled=b_f,
+                    scale_factor=args.scale,
+                    output_dir=args.output,
+                    lanczos_a=3,
+                )
+                print_result("DSP plots", str(Path(args.output) / "dsp_analysis"))
+            except Exception as exc:
+                import traceback
+                print(f"\n  ERROR in DSP analysis: {exc}")
+                traceback.print_exc()
+
         return
 
 
