@@ -126,50 +126,115 @@ def enhance(image, method: str, scale: int, tile: int, face_enhance: bool):
     return result
 
 
-# ── 5. Build Gradio interface ─────────────────────────────────────
+# ── 5. Enhancement + feature extraction (for visualization suite) ──
+def enhance_and_extract(image, scale: int, tile: int):
+    """
+    Called by /enhance_and_extract API.
+    Runs Real-ESRGAN on GPU, then captures conv_first + 23 block features
+    via forward hooks on the INPUT image.
+    Returns: (enhanced_img_np, npz_file_path)
+    """
+    import tempfile
+    scale = int(scale); tile = int(tile)
+    t0 = time.time()
+    print(f"\n  → enhance_and_extract: scale={scale} tile={tile} size={image.shape}")
+
+    # Step 1: enhance
+    up  = _get_upsampler(scale, tile)
+    bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    out_bgr, _ = up.enhance(bgr, outscale=scale)
+    enhanced   = cv2.cvtColor(out_bgr, cv2.COLOR_BGR2RGB)
+
+    # Step 2: forward pass with hooks on the INPUT image
+    net    = up.model
+    cf_out = {}
+    blk_out = {}
+    hooks  = []
+
+    def _hf(m, i, o): cf_out["d"] = o.detach().cpu().numpy()
+    hooks.append(net.conv_first.register_forward_hook(_hf))
+    for idx, b in enumerate(net.body):
+        def _hb(m, i, o, k=idx): blk_out[k] = o.detach().cpu().numpy()
+        hooks.append(b.register_forward_hook(_hb))
+
+    img_f  = image.astype(np.float32)[:, :, ::-1] / 255.0   # RGB→BGR, float
+    img_t  = torch.from_numpy(
+        np.ascontiguousarray(img_f.transpose(2, 0, 1))
+    ).float().unsqueeze(0).to(DEVICE)
+
+    net.eval()
+    with torch.no_grad(): net(img_t)
+    for h in hooks: h.remove()
+
+    # Step 3: save NPZ
+    npz_data = {"conv_first": cf_out["d"]}
+    for i, arr in blk_out.items():
+        npz_data[f"block_{i}"] = arr
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".npz", delete=False)
+    np.savez(tmp.name, **npz_data)
+    tmp.close()
+
+    print(f"  ✓ enhance_and_extract done in {time.time()-t0:.1f}s")
+    return enhanced, tmp.name
+
+
+# ── 6. Build Gradio interface ─────────────────────────────────────
 print("\n[3/3] Starting Gradio server ...")
+
+import gradio as gr
 
 with gr.Blocks(title="Antigravity Colab Worker") as demo:
     gr.Markdown(
         "## Antigravity Colab GPU Worker\n"
-        "This server is running on a Colab GPU. "
-        "Paste the public URL into your local UI or CLI.\n\n"
+        "This server runs on a Colab GPU. "
+        "Paste the public URL into your local CLI `--remote-url` flag.\n\n"
         f"> **GPU:** {torch.cuda.get_device_name(0) if num_gpus > 0 else 'CPU only'}"
     )
     with gr.Row():
         img_in  = gr.Image(type="numpy", label="Input Image")
         img_out = gr.Image(type="numpy", label="Enhanced Output")
 
-    method_in = gr.Textbox(value="realesrgan", label="Method (realesrgan / bicubic / lanczos)")
-    scale_in  = gr.Number(value=4, label="Scale Factor", precision=0)
-    tile_in   = gr.Number(value=0, label="Tile Size (0 = full image)", precision=0)
+    method_in = gr.Textbox(value="realesrgan", label="Method")
+    scale_in  = gr.Number(value=4, label="Scale", precision=0)
+    tile_in   = gr.Number(value=0, label="Tile Size (0=full)", precision=0)
     face_in   = gr.Checkbox(value=False, label="Face Enhance")
 
+    # Standard enhancement endpoint (/enhance)
     run_btn = gr.Button("▶ Run (manual test)", variant="primary")
     run_btn.click(
         fn=enhance,
         inputs=[img_in, method_in, scale_in, tile_in, face_in],
         outputs=img_out,
-        api_name="enhance",   # ← gradio_client calls /enhance
+        api_name="enhance",
     )
 
-# queue() is REQUIRED for API calls in Gradio 4.x
+    # Visualization endpoint (/enhance_and_extract)
+    viz_img_out  = gr.Image(type="numpy",  label="Enhanced (viz)", visible=False)
+    viz_file_out = gr.File(label="Feature NPZ", visible=False)
+    img_in.change(
+        fn=enhance_and_extract,
+        inputs=[img_in, scale_in, tile_in],
+        outputs=[viz_img_out, viz_file_out],
+        api_name="enhance_and_extract",
+    )
+
 demo.queue(max_size=8)
 
-# launch() on a plain Python script is BLOCKING —
-# the cell stays ⌛ running until you press ■ Stop.
 print("\n" + "=" * 60)
-print("  SERVER STARTING — cell will stay ⌛ RUNNING")
-print("  Copy the public URL below and paste into your local UI")
-print("  Press ■ Stop in Colab when you are done")
+print("  SERVER STARTING — this cell stays ⌛ RUNNING")
+print("  Copy the public gradio.live URL below")
+print("  Use: python main.py -i img.jpg --analyze-esrgan -s 4")
+print("       --backend colab --remote-url https://xxxx.gradio.live")
+print("  Press ■ Stop in Colab when done")
 print("=" * 60 + "\n")
 
 demo.launch(
-    share=True,       # creates the public gradio.live URL
+    share=True,
     show_error=True,
     quiet=False,
     inline=False,
 )
 
-# Never reached unless you press Stop — just a safety message
 print("\n  Server stopped.")
+

@@ -51,61 +51,77 @@ def _classify_filter(w3x3):
 # ── PUBLIC ENTRY POINT ───────────────────────────────────────────────────────
 
 def run_visualization_suite(model, input_np, output_np, out_dir, progress_cb=None,
-                            tile_size=0, tile_pad=10):
+                            tile_size=0, tile_pad=10, preloaded_feats=None):
+    """
+    preloaded_feats: dict from np.load(npz), keys: 'conv_first', 'block_0'..'block_22'
+      - If provided: use Colab-captured features, skip local forward pass entirely.
+      - If None: run forward pass locally (local mode).
+    """
     import torch
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
 
-    def _log(s,t,l):
-        if progress_cb: progress_cb(s,t,l)
+    def _log(s, t, l):
+        if progress_cb: progress_cb(s, t, l)
         print(f"  [ESRGAN-VIZ {s}/{t}] {l}")
 
-    rrdb = model.model
-    device = next(rrdb.parameters()).device
-    cf_feat, blk = {}, {}
-    hooks = []
+    # ── Obtain feature maps ────────────────────────────────────────────────────
+    if preloaded_feats is not None:
+        _log(1, 7, "Using GPU features from Colab (no local forward pass) …")
+        cf_feat = {"d": torch.from_numpy(preloaded_feats["conv_first"])}
+        blk     = {i: torch.from_numpy(preloaded_feats[f"block_{i}"])
+                   for i in range(23) if f"block_{i}" in preloaded_feats}
+        w_first = (model.model.conv_first.weight.detach().cpu().numpy()
+                   if model is not None else None)
+    else:
+        _log(1, 7, "Forward pass capturing hooks …")
+        rrdb   = model.model
+        device = next(rrdb.parameters()).device
+        cf_feat, blk, hooks = {}, {}, []
+        def _hf(m, i, o): cf_feat["d"] = o.detach().cpu()
+        hooks.append(rrdb.conv_first.register_forward_hook(_hf))
+        for idx, b in enumerate(rrdb.body):
+            def _hb(m, i, o, k=idx): blk[k] = o.detach().cpu()
+            hooks.append(b.register_forward_hook(_hb))
+        img_bgr = input_np[:, :, ::-1].astype(np.float32) / 255.
+        img_t   = torch.from_numpy(
+            np.ascontiguousarray(img_bgr.transpose(2, 0, 1))
+        ).float().unsqueeze(0).to(device)
+        rrdb.eval()
+        with torch.no_grad(): rrdb(img_t)
+        for h in hooks: h.remove()
+        w_first = rrdb.conv_first.weight.detach().cpu().numpy()
 
-    def _hf(m,i,o): cf_feat["d"]=o.detach().cpu()
-    hooks.append(rrdb.conv_first.register_forward_hook(_hf))
-    for idx,b in enumerate(rrdb.body):
-        def _hb(m,i,o,k=idx): blk[k]=o.detach().cpu()
-        hooks.append(b.register_forward_hook(_hb))
+    # ── Plots ─────────────────────────────────────────────────────────────────
+    _log(2, 7, "Plotting 64 filter responses …")
+    if "d" in cf_feat and w_first is not None:
+        with matplotlib.rc_context(RC):
+            _plot_filters(cf_feat["d"], w_first, input_np, out_dir / "01_filter_responses_64.png")
 
-    img_bgr = input_np[:,:,::-1].astype(np.float32)/255.
-    img_t   = torch.from_numpy(np.ascontiguousarray(img_bgr.transpose(2,0,1))).float().unsqueeze(0).to(device)
+    _log(3, 7, "Plotting 23 RRDB block progression …")
+    if blk:
+        with matplotlib.rc_context(RC):
+            _plot_blocks(blk, out_dir / "02_block_progression_23.png")
 
-    _log(1,7,"Forward pass capturing hooks …")
-    rrdb.eval()
-    with torch.no_grad(): rrdb(img_t)
-    for h in hooks: h.remove()
-
-    w_first = rrdb.conv_first.weight.detach().cpu().numpy()  # (64,3,3,3)
-
-    _log(2,7,"Plotting 64 filter responses …")
+    _log(4, 7, "Frequency domain analysis …")
     with matplotlib.rc_context(RC):
-        _plot_filters(cf_feat["d"], w_first, input_np, out_dir/"01_filter_responses_64.png")
+        _plot_freq_analysis(input_np, output_np, out_dir / "03_frequency_before_after.png")
 
-    _log(3,7,"Plotting 23 RRDB block progression …")
+    _log(5, 7, "New frequency generation map …")
     with matplotlib.rc_context(RC):
-        _plot_blocks(blk, out_dir/"02_block_progression_23.png")
+        _plot_new_freqs(input_np, output_np, out_dir / "04_new_frequencies_generated.png")
 
-    _log(4,7,"Frequency domain analysis …")
+    _log(6, 7, "Radar summary …")
     with matplotlib.rc_context(RC):
-        _plot_freq_analysis(input_np, output_np, out_dir/"03_frequency_before_after.png")
+        _plot_radar(input_np, output_np, out_dir / "05_radar_summary.png")
 
-    _log(5,7,"New frequency generation map …")
-    with matplotlib.rc_context(RC):
-        _plot_new_freqs(input_np, output_np, out_dir/"04_new_frequencies_generated.png")
-
-    _log(6,7,"Radar summary …")
-    with matplotlib.rc_context(RC):
-        _plot_radar(input_np, output_np, out_dir/"05_radar_summary.png")
-
-    _log(7,7,"Tiling / grid diagram …")
+    _log(7, 7, "Tiling / grid diagram …")
     with matplotlib.rc_context(RC):
         _plot_tiling(input_np, output_np, tile_size, tile_pad,
-                     out_dir/"06_tiling_grid_diagram.png")
+                     out_dir / "06_tiling_grid_diagram.png")
 
     print(f"\n  ✓ All 6 visualizations → {out_dir}\n")
+
+
 
 
 # ── 1. FILTER RESPONSES ──────────────────────────────────────────────────────
@@ -176,72 +192,70 @@ _STAGE_LABELS = {
 
 def _plot_blocks(block_feats, save_path):
     n = len(block_feats)
-    energies, deltas = [], [0.0]
+    energies = [float(np.mean(np.abs(block_feats[i].squeeze(0).numpy()))) for i in range(n)]
+    # deltas[i] = change from block i-1 to block i  (length = n-1)
+    deltas = [energies[i] - energies[i-1] for i in range(1, n)]
 
-    for i in range(n):
-        feat = block_feats[i].squeeze(0).numpy()
-        e = float(np.mean(np.abs(feat)))
-        energies.append(e)
-    for i in range(1,n):
-        deltas.append(energies[i]-energies[i-1])
-
-    fig = plt.figure(figsize=(28,12))
+    fig = plt.figure(figsize=(28, 12))
     fig.suptitle(
         "Real-ESRGAN — 23 RRDB Block Feature Progression\n"
-        "Top row: mean feature activation per block (what the model 'sees' as depth increases). "
-        "Bottom: energy change between consecutive blocks (positive = new information added).",
+        "Top row: mean feature activation per block. "
+        "Bottom: energy change vs. previous block (green=added detail, red=refinement).",
         color=TEXT, fontsize=10, fontweight="bold", y=0.98)
 
-    gs_top = gridspec.GridSpec(1,n, figure=fig, left=0.01, right=0.99,
+    gs_top = gridspec.GridSpec(1, n, figure=fig, left=0.01, right=0.99,
                                top=0.87, bottom=0.42, wspace=0.04)
-    gs_bot = gridspec.GridSpec(1,1, figure=fig, left=0.06, right=0.99,
+    gs_bot = gridspec.GridSpec(1, 1, figure=fig, left=0.06, right=0.99,
                                top=0.37, bottom=0.07)
 
     for i in range(n):
-        feat = block_feats[i].squeeze(0).numpy()
+        feat    = block_feats[i].squeeze(0).numpy()
         mean_fm = feat.mean(axis=0)
-        lo,hi = mean_fm.min(),mean_fm.max()
-        if hi>lo: mean_fm=(mean_fm-lo)/(hi-lo)
+        lo, hi  = mean_fm.min(), mean_fm.max()
+        if hi > lo: mean_fm = (mean_fm - lo) / (hi - lo)
 
-        ax = fig.add_subplot(gs_top[0,i])
+        ax = fig.add_subplot(gs_top[0, i])
         ax.imshow(mean_fm, cmap="inferno", interpolation="nearest", aspect="auto")
-        stage = _STAGE_LABELS.get(i,"")
-        label_color = GREEN if i in _STAGE_LABELS else TEXT2
-        ax.set_title(f"B{i+1:02d}\n{stage}", color=label_color, fontsize=5.5, pad=2)
+        stage = _STAGE_LABELS.get(i, "")
+        lc    = GREEN if i in _STAGE_LABELS else TEXT2
+        ax.set_title(f"B{i+1:02d}\n{stage}", color=lc, fontsize=5.5, pad=2)
         ax.set_xticks([]); ax.set_yticks([])
         for sp in ax.spines.values():
             sp.set_edgecolor(GREEN if i in _STAGE_LABELS else BG3)
 
-        if i > 0 and deltas[i] > 0.01:
-            ax.text(0.5,-0.25,f"+{deltas[i]:.3f}", transform=ax.transAxes,
-                    ha="center", color=GREEN, fontsize=5)
-        elif i > 0 and deltas[i] < -0.01:
-            ax.text(0.5,-0.25,f"{deltas[i]:.3f}", transform=ax.transAxes,
-                    ha="center", color=RED, fontsize=5)
+        if i > 0:
+            d = deltas[i - 1]
+            col = GREEN if d >= 0 else RED
+            ax.text(0.5, -0.25, f"{d:+.3f}", transform=ax.transAxes,
+                    ha="center", color=col, fontsize=5)
 
-    ax_b = fig.add_subplot(gs_bot[0,0])
+    ax_b = fig.add_subplot(gs_bot[0, 0])
     _s(ax_b,
-       title="Block-to-Block Energy Change  (positive = new information injected, negative = compression/noise removal)",
-       xlabel="RRDB Block #", ylabel="ΔEnergy vs previous block")
+       title="Block-to-Block Energy Change  (positive=new info injected, negative=refinement)",
+       xlabel="RRDB Block #  (showing change FROM block n-1 TO block n)",
+       ylabel="ΔEnergy")
 
-    xs = np.arange(1,n+1)
-    cols = [GREEN if d>=0 else RED for d in deltas[1:]]
-    ax_b.bar(xs, deltas[1:], color=cols, alpha=0.8, width=0.7)
+    # xs_bar: blocks 2..n (where the delta is defined)
+    xs_bar = np.arange(2, n + 1)          # length n-1 ✓
+    cols   = [GREEN if d >= 0 else RED for d in deltas]   # length n-1 ✓
+    ax_b.bar(xs_bar, deltas, color=cols, alpha=0.8, width=0.7)
     ax_b.axhline(0, color=TEXT2, linewidth=0.8, linestyle="--", alpha=0.5)
-    ax_b.set_xticks(xs)
-    ax_b.set_xticklabels([str(x) for x in xs], fontsize=6)
+    ax_b.set_xticks(xs_bar)
+    ax_b.set_xticklabels([str(x) for x in xs_bar], fontsize=6)
 
     for i, lbl in _STAGE_LABELS.items():
-        if i < n:
-            ax_b.axvline(i+1, color=GOLD, linewidth=0.8, linestyle=":", alpha=0.5)
-            ax_b.text(i+1.1, ax_b.get_ylim()[1]*0.85,
-                      lbl.replace("\n"," "), color=GOLD, fontsize=6, rotation=0)
+        xv = i + 1      # block number (1-indexed)
+        if 2 <= xv <= n:
+            ax_b.axvline(xv, color=GOLD, linewidth=0.8, linestyle=":", alpha=0.5)
+            ax_b.text(xv + 0.15, ax_b.get_ylim()[1] * 0.85,
+                      lbl.replace("\n", " "), color=GOLD, fontsize=6)
 
-    p1=mpatches.Patch(color=GREEN,label="Energy increase (new detail added)")
-    p2=mpatches.Patch(color=RED,  label="Energy decrease (refinement/denoising)")
-    ax_b.legend(handles=[p1,p2], facecolor=BG3, labelcolor=TEXT, fontsize=7, loc="upper right")
+    p1 = mpatches.Patch(color=GREEN, label="Energy increase (new detail added)")
+    p2 = mpatches.Patch(color=RED,   label="Energy decrease (refinement/denoising)")
+    ax_b.legend(handles=[p1, p2], facecolor=BG3, labelcolor=TEXT, fontsize=7, loc="upper right")
 
     fig.savefig(save_path, dpi=120, bbox_inches="tight"); plt.close(fig)
+
 
 
 # ── 3. FREQUENCY ANALYSIS ─────────────────────────────────────────────────────

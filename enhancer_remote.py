@@ -217,3 +217,71 @@ def _fallback_local(
         face_enhance=face_enhance,
         progress_callback=progress_callback,
     )
+
+
+# ---------------------------------------------------------------------------
+# New: enhance + extract features in one Colab call
+# ---------------------------------------------------------------------------
+
+def enhance_and_extract(
+    input_path: str | Path,
+    output_path: str | Path,
+    npz_path: str | Path,
+    outscale: int = 4,
+    tile: int = 0,
+    remote_url: str | None = None,
+) -> dict:
+    """
+    Call the Colab worker's /enhance_and_extract endpoint.
+
+    Colab GPU runs:
+      1. Real-ESRGAN enhancement
+      2. Forward pass with hooks → captures conv_first + 23 block features
+
+    Returns dict with keys 'conv_first', 'block_0'..'block_22' (numpy arrays).
+    The enhanced image is saved to output_path.
+    The raw npz is saved to npz_path (for debugging).
+    """
+    import numpy as np
+    input_path  = Path(input_path)
+    output_path = Path(output_path)
+    npz_path    = Path(npz_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    target_url = (remote_url or COLAB_WORKER_URL or "").strip()
+    if not target_url:
+        raise RuntimeError("No Colab URL — set --remote-url or COLAB_WORKER_URL")
+
+    from gradio_client import Client, handle_file
+    print(f"[enhancer_remote] Connecting to Colab GPU: {target_url}")
+    t0     = time.time()
+    client = Client(target_url, verbose=False)
+
+    job = client.submit(
+        image    = handle_file(str(input_path)),
+        scale    = outscale,
+        tile     = tile,
+        api_name = "/enhance_and_extract",
+    )
+
+    while not job.done():
+        time.sleep(0.5)
+
+    elapsed = time.time() - t0
+    outputs = job.outputs()
+    if not outputs or len(outputs) < 2:
+        raise RuntimeError(f"Expected 2 outputs (image + npz), got {len(outputs or [])}")
+
+    enhanced_file, npz_file = outputs[0], outputs[1]
+
+    # Save enhanced image
+    Image.open(enhanced_file).convert("RGB").save(str(output_path), format="PNG")
+
+    # Copy and load NPZ
+    import shutil
+    shutil.copy(npz_file, str(npz_path))
+    feats = dict(np.load(npz_path, allow_pickle=False))
+
+    print(f"[enhancer_remote] ✅ Enhancement + feature extraction done in {elapsed:.1f}s")
+    return feats
+

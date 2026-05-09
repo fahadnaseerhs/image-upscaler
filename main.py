@@ -366,126 +366,100 @@ def run_pipeline(args: argparse.Namespace) -> None:
         viz_dir  = out_root / "realesrgan" / stem
         viz_dir.mkdir(parents=True, exist_ok=True)
 
-        # ---- Step 1: get enhanced image (remote) ----
+        # ── Step 1: Enhancement + feature extraction ──────────────────────────
         if args.backend != "local":
-            print_stage(1, f"Remote Enhancement ({args.backend}) + Full Visualization Suite")
+            # ── ALL AI work on Colab GPU ──────────────────────────────────────
+            print_stage(1, f"Colab GPU: Enhancement + Hook Feature Extraction")
             import enhancer_remote
             out_path = viz_dir / "00_enhanced_output.png"
+            npz_path = viz_dir / "features.npz"
             try:
-                enhancer_remote.enhance_with_realesrgan(
+                feats = enhancer_remote.enhance_and_extract(
                     input_path=args.input,
                     output_path=out_path,
+                    npz_path=npz_path,
                     outscale=args.scale,
                     tile=0,
-                    face_enhance=False,
                     remote_url=getattr(args, "remote_url", ""),
-                    method=args.method,
                 )
-                print_result("Remote", f"Enhancement done ({time.time()-t0:.2f}s)")
+                print_result("Colab GPU", f"Enhancement + features done ({time.time()-t0:.2f}s)")
+                # feats = dict loaded from npz: {"conv_first": arr, "block_0"..arr}
             except Exception as exc:
-                print_error(f"Remote enhancement failed: {exc}")
+                print_error(f"Remote enhancement/extraction failed: {exc}")
                 return
 
-            # Load model weights LOCALLY (CPU only) just for hook-based visualization.
-            # We only need a single forward pass on the small input — no scaling needed.
-            print_note("Loading RRDBNet weights locally for filter/block visualization …")
+            # Build stub upsampler-like object just to carry weights for viz
             try:
                 import torch
-                import urllib.request
                 from basicsr.archs.rrdbnet_arch import RRDBNet
                 from realesrgan import RealESRGANer
-
+                import urllib.request
                 model_path = Path("models") / "RealESRGAN_x4plus.pth"
                 model_path.parent.mkdir(parents=True, exist_ok=True)
                 if not model_path.exists():
-                    print_note("Downloading RealESRGAN_x4plus.pth …")
+                    print_note("Downloading weights for filter classification only …")
                     urllib.request.urlretrieve(
                         "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
-                        str(model_path),
-                    )
+                        str(model_path))
                 net = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
                               num_block=23, num_grow_ch=32, scale=4)
-                # Force CPU so this works on any machine without a local GPU
-                upsampler = RealESRGANer(
-                    scale=4, model_path=str(model_path), model=net,
-                    tile=0, tile_pad=10, pre_pad=0, half=False,
-                    device=torch.device("cpu"),
-                )
-                print_result("Model loaded", "CPU (for viz hooks only)")
+                upsampler = RealESRGANer(scale=4, model_path=str(model_path), model=net,
+                                         tile=0, tile_pad=10, pre_pad=0, half=False,
+                                         device=torch.device("cpu"))
+                print_result("Weights loaded", "CPU (for filter labels only — no forward pass)")
             except Exception as exc:
-                print_note(f"Could not load model locally ({exc}) — filter/block plots will be skipped.")
+                print_note(f"Weight load failed ({exc}) — filter-type labels skipped.")
                 upsampler = None
 
-        # ---- Step 1b: local enhancement path ----
         else:
+            # ── Local GPU/CPU ──────────────────────────────────────────────────
             print_stage(1, "Local Real-ESRGAN + Visualization Suite")
             out_path = viz_dir / "00_enhanced_output.png"
+            feats    = None
             try:
-                import torch
-                import urllib.request
+                import torch, cv2 as _cv2, urllib.request
                 from basicsr.archs.rrdbnet_arch import RRDBNet
                 from realesrgan import RealESRGANer
-                import cv2 as _cv2
-
                 model_path = Path("models") / "RealESRGAN_x4plus.pth"
                 model_path.parent.mkdir(parents=True, exist_ok=True)
                 if not model_path.exists():
                     print_note("Downloading RealESRGAN_x4plus.pth …")
                     urllib.request.urlretrieve(
                         "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
-                        str(model_path),
-                    )
+                        str(model_path))
                 net = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
                               num_block=23, num_grow_ch=32, scale=4)
-                upsampler = RealESRGANer(
-                    scale=4, model_path=str(model_path), model=net,
-                    tile=0, tile_pad=10, pre_pad=0,
-                    half=torch.cuda.is_available(),
-                )
+                upsampler = RealESRGANer(scale=4, model_path=str(model_path), model=net,
+                                          tile=0, tile_pad=10, pre_pad=0,
+                                          half=torch.cuda.is_available())
                 img_bgr = _cv2.imread(str(args.input), _cv2.IMREAD_COLOR)
                 out_bgr, _ = upsampler.enhance(img_bgr, outscale=args.scale)
                 _cv2.imwrite(str(out_path), out_bgr)
                 print_result("Local AI", f"Enhancement done ({time.time()-t0:.2f}s)")
             except Exception as exc:
-                print_error(f"Local enhancement failed: {exc}")
-                return
+                print_error(f"Local enhancement failed: {exc}"); return
 
-        # ---- Step 2: load input + output as numpy arrays ----
+        # ── Step 2: load image arrays ──────────────────────────────────────────
         try:
             img_in_np  = _np.array(_PILImg.open(args.input).convert("RGB"))
             img_out_np = _np.array(_PILImg.open(str(out_path)).convert("RGB"))
         except Exception as exc:
-            print_error(f"Could not read images for visualization: {exc}")
-            return
+            print_error(f"Could not read images: {exc}"); return
 
-        # ---- Step 3: run FULL visualization suite (all 5 plots) ----
-        print_stage(2, "Generating full visualization suite (all 5 plots) …")
+        # ── Step 3: visualization suite ────────────────────────────────────────
+        print_stage(2, "Generating all 6 visualization plots …")
         try:
-            if upsampler is not None:
-                # Full suite: hooks run on local model (even if enhancement was remote)
-                run_visualization_suite(
-                    model=upsampler,
-                    input_np=img_in_np,
-                    output_np=img_out_np,
-                    out_dir=viz_dir,
-                )
-            else:
-                # Fallback: only FFT + radar (model load failed)
-                from graphs.realesrgan_viz import _plot_freq_analysis, _plot_new_freqs, _plot_radar
-                import matplotlib
-                matplotlib.use("Agg")
-                with matplotlib.rc_context({
-                    "figure.facecolor": "#07080f", "axes.facecolor": "#0d0f1a",
-                    "axes.edgecolor": "#111526", "text.color": "#e0e4ff",
-                    "axes.labelcolor": "#8890b8", "xtick.color": "#8890b8",
-                    "ytick.color": "#8890b8", "grid.color": "#111526",
-                    "font.family": "monospace", "savefig.facecolor": "#07080f",
-                }):
-                    _plot_freq_analysis(img_in_np, img_out_np, viz_dir / "03_frequency_before_after.png")
-                    _plot_new_freqs(img_in_np, img_out_np, viz_dir / "04_new_frequencies_generated.png")
-                    _plot_radar(img_in_np, img_out_np, viz_dir / "05_radar_summary.png")
+            run_visualization_suite(
+                model=upsampler,
+                input_np=img_in_np,
+                output_np=img_out_np,
+                out_dir=viz_dir,
+                preloaded_feats=feats,     # None → hooks run locally; dict → use Colab feats
+            )
         except Exception as exc:
-            print_note(f"Visualization suite error: {exc} — enhanced image still saved.")
+            print_note(f"Visualization error: {exc} — enhanced image still saved.")
+
+
 
         print_result("Suite done", f"{time.time()-t0:.2f}s total")
         print_result("Output dir", str(viz_dir))
