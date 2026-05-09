@@ -27,6 +27,18 @@ output/*
 # Model weights (too large for git)
 models/
 hf_space/models/
+gfpgan/weights/
+*.pth
+*.pt
+*.ckpt
+
+# Large output/analysis folders
+all_diffrence/
+all_diffrence1/
+*.zip
+
+# Temporary files
+photo.jpg
 
 # OS
 .DS_Store
