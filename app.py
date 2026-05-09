@@ -35,9 +35,15 @@ import saver
 import enhancer
 import enhancer_remote
 
-# Backend for AI enhancement: "remote" (HF Space) or "local" (on-device).
+# Backend for AI enhancement: "remote" (Colab/HF Space) or "local" (on-device).
 # Set via environment variable ENHANCER_BACKEND. Default is "remote".
 ENHANCER_BACKEND = os.environ.get("ENHANCER_BACKEND", "remote").lower()
+
+# Optional: override the remote URL at startup via env var.
+# The Colab worker URL (https://xxxx.gradio.live) can also be set here
+# so the app uses it without needing to restart.
+# Example:  set COLAB_WORKER_URL=https://xxxx.gradio.live
+_COLAB_WORKER_URL: str = os.environ.get("COLAB_WORKER_URL", "").strip()
 
 app = Flask(__name__)
 
@@ -407,10 +413,30 @@ def get_hardware():
 
     # Enhancement backend info
     info["enhancer_backend"] = ENHANCER_BACKEND
-    if ENHANCER_BACKEND == "remote":
-        info["hf_space_url"] = enhancer_remote.HF_SPACE_URL or "(not configured)"
+    remote_status = enhancer_remote.get_remote_status()
+    info["remote_backend"]  = remote_status["backend"]
+    info["remote_label"]    = remote_status["label"]
+    info["remote_url"]      = remote_status["url"] or "(not configured)"
 
     return jsonify(info)
+
+
+@app.route("/api/set-colab-url", methods=["POST"])
+def set_colab_url():
+    """
+    Allow the UI to set the Colab worker URL at runtime without restarting.
+    POST JSON: { "url": "https://xxxx.gradio.live" }
+    """
+    data = request.get_json(silent=True) or {}
+    url  = str(data.get("url", "")).strip()
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+
+    # Inject into the enhancer_remote module so all future calls use it
+    enhancer_remote.COLAB_WORKER_URL = url
+    os.environ["COLAB_WORKER_URL"]   = url
+    print(f"[app] Colab worker URL updated: {url}")
+    return jsonify({"ok": True, "url": url, "label": "Colab GPU Worker"})
 
 
 @app.route("/api/process", methods=["POST"])
