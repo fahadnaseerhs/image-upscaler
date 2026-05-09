@@ -37,27 +37,23 @@ def enhance_with_realesrgan(
     input_path: str | Path,
     output_path: str | Path,
     outscale: int = 4,
-    tile: int = 0,           # ignored for remote (Space handles tiling)
+    tile: int = 0,
     face_enhance: bool = False,
     progress_callback = None,
+    remote_url: str | None = None,
+    method: str = "realesrgan",
 ) -> str:
     """
-    Enhance an image via the remote HF Space API.
-
-    Falls back to local enhancer.py if:
-      - HF_SPACE_URL is not set
-      - gradio_client is not installed
-      - The remote API is unreachable or errors out
-
-    Returns:
-        Absolute output path as string.
+    Enhance an image via the remote HF Space or Colab API.
     """
     input_path = Path(input_path)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if not HF_SPACE_URL:
-        print("[enhancer_remote] HF_SPACE_URL not set — falling back to local")
+    target_url = remote_url or HF_SPACE_URL
+
+    if not target_url:
+        print("[enhancer_remote] Remote URL not set — falling back to local")
         return _fallback_local(input_path, output_path, outscale, tile, face_enhance, progress_callback)
 
     try:
@@ -68,16 +64,29 @@ def enhance_with_realesrgan(
         return _fallback_local(input_path, output_path, outscale, tile, face_enhance, progress_callback)
 
     try:
-        print(f"[enhancer_remote] Connecting to HF Space: {HF_SPACE_URL}")
+        print(f"[enhancer_remote] Connecting to remote: {target_url}")
         t0 = time.time()
 
-        client = Client(HF_SPACE_URL)
-        job = client.submit(
-            input_image=handle_file(str(input_path)),
-            outscale=outscale,
-            face_enhance=face_enhance,
-            api_name="/enhance",
-        )
+        client = Client(target_url)
+        
+        # Colab worker expects method and tile, HF space might only take 3 args. 
+        # For safety, if it's the default HF space, we only send 3 args.
+        if "hsfahadnaseer" in target_url:
+            job = client.submit(
+                input_image=handle_file(str(input_path)),
+                outscale=outscale,
+                face_enhance=face_enhance,
+                api_name="/enhance",
+            )
+        else:
+            job = client.submit(
+                image=handle_file(str(input_path)),
+                method=method,
+                scale=outscale,
+                tile=tile,
+                face_enhance=face_enhance,
+                api_name="/enhance",
+            )
 
         import json
         while not job.done():

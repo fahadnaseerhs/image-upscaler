@@ -41,6 +41,7 @@ import loader
 import grid
 import interpolation
 import saver
+import graphs
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +50,7 @@ import saver
 
 TOTAL_STAGES   = 5
 VALID_SCALES   = [2, 4, 8]
-VALID_METHODS  = ["bicubic", "lanczos"]
+VALID_METHODS  = ["bicubic", "lanczos", "realesrgan"]
 VALID_LANCZOS_A = [2, 3]
 
 
@@ -178,6 +179,22 @@ def parse_args() -> argparse.Namespace:
         "--quiet", "-q",
         action="store_true",
         help="Suppress all progress output except the final saved path.",
+    )
+    parser.add_argument(
+        "--analyze-dsp",
+        action="store_true",
+        help="Run the DSP analysis visualization suite (generates and shows technical graphs).",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["local", "remote", "colab"],
+        default="local",
+        help="Backend device for execution (local, remote, or colab). Default: local"
+    )
+    parser.add_argument(
+        "--remote-url",
+        default="",
+        help="Public URL of the remote Hugging Face space or Colab ngrok instance."
     )
 
     return parser.parse_args()
@@ -325,6 +342,49 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     pipeline_start = time.time()
 
+    if args.backend != "local":
+        print_stage(1, f"Remote Execution ({args.backend})")
+        t0 = time.time()
+        import enhancer_remote
+        out_name = Path(args.input).stem + f"_{args.method}_{args.scale}x_remote.png"
+        out_path = Path(args.output) / out_name
+        
+        try:
+            final_path = enhancer_remote.enhance_with_realesrgan(
+                input_path=args.input,
+                output_path=out_path,
+                outscale=args.scale,
+                tile=0,
+                face_enhance=False,
+                remote_url=args.remote_url,
+                method=args.method
+            )
+            print_result("Remote", f"Done ({time.time()-t0:.2f}s)")
+            print_result("Saved to", str(final_path))
+        except Exception as exc:
+            print_error(f"Remote processing failed: {exc}")
+        return
+
+    if args.backend == "local" and args.method == "realesrgan":
+        print_stage(1, "Local AI Execution (Real-ESRGAN)")
+        t0 = time.time()
+        import enhancer
+        out_name = Path(args.input).stem + f"_realesrgan_{args.scale}x.png"
+        out_path = Path(args.output) / out_name
+        try:
+            final_path = enhancer.enhance_with_realesrgan(
+                input_path=args.input,
+                output_path=out_path,
+                outscale=args.scale,
+                tile=0,
+                face_enhance=False
+            )
+            print_result("Local AI", f"Done ({time.time()-t0:.2f}s)")
+            print_result("Saved to", str(final_path))
+        except Exception as exc:
+            print_error(f"Local AI processing failed: {exc}")
+        return
+
     # ------------------------------------------------------------------
     # Stage 1 — Load
     # ------------------------------------------------------------------
@@ -453,6 +513,19 @@ def run_pipeline(args: argparse.Namespace) -> None:
                 except Exception as exc:
                     print_note(f"Interpolation visualization skipped ({exc})")
 
+        if args.analyze_dsp:
+            try:
+                graphs.run_analysis(
+                    method=args.method,
+                    r_orig=r_norm, g_orig=g_norm, b_orig=b_norm,
+                    r_filled=r_filled, g_filled=g_filled, b_filled=b_filled,
+                    scale_factor=args.scale,
+                    output_dir=args.output,
+                    lanczos_a=args.lanczos_a
+                )
+            except Exception as exc:
+                print_error(f"Failed during DSP analysis: {exc}")
+
     # ------------------------------------------------------------------
     # Stage 4 — Save
     # ------------------------------------------------------------------
@@ -523,6 +596,20 @@ def run_pipeline(args: argparse.Namespace) -> None:
     print_result("Total time", f"{total_time:.2f}s")
     print_result("Output", saved_path)
     print()
+    
+    if args.analyze_dsp:
+        print("================================================================")
+        print("                  DSP ANALYSIS COMMANDS CHEAT SHEET             ")
+        print("================================================================")
+        print("Basic Upscale:         python main.py -i img.jpg")
+        print("Bicubic Method:        python main.py -i img.jpg -m bicubic")
+        print("Lanczos Method:        python main.py -i img.jpg -m lanczos")
+        print("Specific Scale (4x):   python main.py -i img.jpg -s 4")
+        print("Run DSP Analysis:      python main.py -i img.jpg --analyze-dsp")
+        print("Compare Both Methods:  python main.py -i img.jpg --compare")
+        print("================================================================")
+        print()
+        
     _quiet = was_quiet
 
 

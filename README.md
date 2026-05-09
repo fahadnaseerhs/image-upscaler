@@ -102,52 +102,40 @@ python main.py --input photo.jpg
 
 ## ⌨️ CLI Commands
 
+### Web Server (`app.py`)
+
+Run the web UI — the **Execution Backend** is chosen interactively in the browser UI itself, no flags needed.
+
 ```bash
-# Basic upscale (2× Lanczos, default)
-python main.py --input photo.jpg
-
-# Bicubic 4× upscale
-python main.py --input photo.jpg --method bicubic --scale 4
-
-# Lanczos with window a=2
-python main.py --input photo.jpg --method lanczos --lanczos-a 2
-
-# Compare both methods side-by-side
-python main.py --input photo.jpg --compare
-
-# With sharpening
-python main.py --input photo.jpg --sharpen
-
-# Show animated visualizations
-python main.py --input photo.jpg --visualize
-
-# Save individual R, G, B channel images
-python main.py --input photo.jpg --save-channels
-
-# Custom output directory
-python main.py --input photo.jpg --output ./results
-
-# Quiet mode (minimal output)
-python main.py --input photo.jpg --quiet
-
-# Full example
-python main.py --input photo.jpg --scale 4 --method lanczos --lanczos-a 3 --sharpen --visualize
+python app.py
 ```
 
-### CLI Options Reference
+Open `http://localhost:5000`, select your backend (`Local CPU/GPU`, `Hugging Face`, or `Google Colab`) and paste in your Colab/remote URL if needed.
 
-| Flag              | Default    | Description                                      |
-|-------------------|------------|--------------------------------------------------|
-| `--input`, `-i`   | *required* | Path to input image                              |
-| `--output`, `-o`  | `./output` | Output directory                                 |
-| `--scale`, `-s`   | `2`        | Scale factor (2, 4, or 8)                        |
-| `--method`, `-m`  | `lanczos`  | Interpolation method (`bicubic` or `lanczos`)    |
-| `--lanczos-a`     | `3`        | Lanczos window size (2 or 3)                     |
-| `--sharpen`       | off        | Apply UnsharpMask post-processing                |
-| `--compare`       | off        | Run both methods and show comparison             |
-| `--visualize`     | off        | Show animated grid/interpolation visualizations  |
-| `--save-channels` | off        | Save R, G, B as separate grayscale PNGs          |
-| `--quiet`, `-q`   | off        | Suppress progress output                         |
+### Pipeline Processing (`main.py`)
+
+| Command | Description |
+|---------|-------------|
+| `python main.py -i photo.jpg` | Basic 2× Lanczos upscale (default) |
+| `python main.py -i photo.jpg -m bicubic -s 4` | Bicubic 4× upscale locally |
+| `python main.py -i photo.jpg -m lanczos --lanczos-a 2` | Lanczos with window a=2 (faster) |
+| `python main.py -i photo.jpg -m realesrgan -s 4` | Real-ESRGAN AI upscale locally |
+| `python main.py -i photo.jpg --compare` | Compare both Bicubic and Lanczos side-by-side |
+| `python main.py -i photo.jpg --sharpen` | Apply UnsharpMask post-processing |
+| `python main.py -i photo.jpg --visualize` | Show animated grid visualizations |
+| `python main.py -i photo.jpg --analyze-dsp` | Run the DSP analysis visualization suite |
+| `python main.py -i photo.jpg -q` | Quiet mode (minimal console output) |
+| `python main.py -i photo.jpg -m realesrgan --backend remote` | Offload to Hugging Face Space |
+| `python main.py -i photo.jpg -m lanczos -s 4 --backend colab --remote-url https://xxxx.gradio.live` | Offload to Google Colab GPU |
+
+#### Backend Flags
+
+| Flag | Options | Description |
+|------|---------|-------------|
+| `--backend` | `local` *(default)*, `remote`, `colab` | Where to run the processing |
+| `--remote-url` | any URL | Colab `gradio.live` or custom HF URL. Leave blank for default HF Space. |
+
+*Run `python main.py --help` to see the full argument list.*
 
 ---
 

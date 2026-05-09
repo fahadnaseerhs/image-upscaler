@@ -100,6 +100,8 @@ def _run_pipeline(
     compare: bool,
     realesrgan_tile: int,
     face_enhance: bool,
+    backend: str,
+    remote_url: str,
     emit,            # callable(event, data) — sends SSE to the client
 ) -> None:
     """
@@ -162,11 +164,11 @@ def _run_pipeline(
         emit("griddata", grid_data)
 
         saved_paths = {}
-        if method == "realesrgan" and not compare:
-            # ── Stage 3: AI enhancement ────────────────────────────────────
-            emit("stage", {"stage": 3, "label": "AI enhancement"})
+        if backend != "local" and not compare:
+            # ── Stage 3: Remote Processing (Colab/HF) ──────────────────────
+            emit("stage", {"stage": 3, "label": "Remote execution"})
             t0 = time.time()
-            backend_label = "remote (HF Space)" if ENHANCER_BACKEND == "remote" else "local"
+            backend_label = f"remote ({backend})"
             emit("channel", {"method": method, "channel": "all", "backend": backend_label})
             out_name = saver.generate_filename(
                 input_path=input_path,
@@ -176,11 +178,51 @@ def _run_pipeline(
             )
             out_path = OUTPUT_DIR / out_name
 
-            # Choose enhancement backend
-            if ENHANCER_BACKEND == "remote":
-                enhance_fn = enhancer_remote.enhance_with_realesrgan
-            else:
-                enhance_fn = enhancer.enhance_with_realesrgan
+            def r_progress_callback(current, total, dt, cpu):
+                emit("realesrgan_progress", {
+                    "current": current,
+                    "total": total,
+                    "dt": round(dt, 3),
+                    "cpu": cpu
+                })
+
+            final_path = enhancer_remote.enhance_with_realesrgan(
+                input_path=input_path,
+                output_path=out_path,
+                outscale=scale,
+                tile=realesrgan_tile,
+                face_enhance=face_enhance,
+                progress_callback=r_progress_callback,
+                remote_url=remote_url,
+                method=method
+            )
+            saved_paths[method] = Path(final_path).name
+            emit("progress", {
+                "stage": 3,
+                "detail": f"{method.capitalize()} done ({backend_label})",
+                "elapsed": round(time.time() - t0, 2),
+            })
+
+            # ── Stage 4: Save (already saved by remote script) ───────────
+            emit("stage", {"stage": 4, "label": "Saving"})
+            emit("progress", {
+                "stage": 4,
+                "detail": "Written to disk",
+                "elapsed": 0.0,
+            })
+        elif method == "realesrgan" and not compare:
+            # ── Stage 3: AI enhancement (Local) ────────────────────────────
+            emit("stage", {"stage": 3, "label": "AI enhancement"})
+            t0 = time.time()
+            backend_label = "local"
+            emit("channel", {"method": method, "channel": "all", "backend": backend_label})
+            out_name = saver.generate_filename(
+                input_path=input_path,
+                output_dir=str(OUTPUT_DIR),
+                method=method,
+                scale_factor=scale,
+            )
+            out_path = OUTPUT_DIR / out_name
 
             def r_progress_callback(current, total, dt, cpu):
                 emit("realesrgan_progress", {
@@ -190,7 +232,7 @@ def _run_pipeline(
                     "cpu": cpu
                 })
 
-            final_path = enhance_fn(
+            final_path = enhancer.enhance_with_realesrgan(
                 input_path=input_path,
                 output_path=out_path,
                 outscale=scale,
@@ -321,6 +363,24 @@ def get_grid_data():
         return jsonify(_latest_grid_data)
 
 
+@app.route("/api/cpu")
+def get_cpu():
+    """Return live CPU and memory usage for the UI polling."""
+    info: dict = {"cpu": 0.0, "mem": 0.0, "backend": ENHANCER_BACKEND}
+    try:
+        import psutil
+        info["cpu"] = psutil.cpu_percent(interval=None)
+        vm = psutil.virtual_memory()
+        info["mem"] = round(vm.percent, 1)
+        info["mem_used_gb"] = round(vm.used / (1024 ** 3), 2)
+        info["mem_total_gb"] = round(vm.total / (1024 ** 3), 2)
+    except ImportError:
+        # psutil not installed — best-effort fallback
+        info["cpu"] = 0.0
+        info["mem"] = 0.0
+    return jsonify(info)
+
+
 @app.route("/api/hardware")
 def get_hardware():
     """Return lightweight CPU/GPU info for the UI."""
@@ -380,9 +440,12 @@ def process():
     compare   = request.form.get("compare", "false").lower() == "true"
     tile      = int(request.form.get("tile", 0))
     face_enhance = request.form.get("face_enhance", "false").lower() == "true"
+    backend   = request.form.get("backend", "local").lower()
+    remote_url = request.form.get("remote_url", "")
+    
     if method not in {"bicubic", "lanczos", "realesrgan"}:
         return jsonify({"error": "Invalid method"}), 400
-    if method == "realesrgan":
+    if method == "realesrgan" or backend != "local":
         compare = False
 
     ext = Path(f.filename).suffix.lower()
@@ -421,6 +484,8 @@ def process():
                 compare=compare,
                 realesrgan_tile=tile,
                 face_enhance=face_enhance,
+                backend=backend,
+                remote_url=remote_url,
                 emit=emit,
             )
         except Exception as exc:
@@ -441,10 +506,6 @@ def process():
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-
-# ---------------------------------------------------------------------------
-# Entry
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     print("\n  Image Decoding Pipeline — Web UI")
