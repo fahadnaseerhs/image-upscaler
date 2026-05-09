@@ -50,7 +50,8 @@ def _classify_filter(w3x3):
 
 # ── PUBLIC ENTRY POINT ───────────────────────────────────────────────────────
 
-def run_visualization_suite(model, input_np, output_np, out_dir, progress_cb=None):
+def run_visualization_suite(model, input_np, output_np, out_dir, progress_cb=None,
+                            tile_size=0, tile_pad=10):
     import torch
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -72,35 +73,39 @@ def run_visualization_suite(model, input_np, output_np, out_dir, progress_cb=Non
     img_bgr = input_np[:,:,::-1].astype(np.float32)/255.
     img_t   = torch.from_numpy(np.ascontiguousarray(img_bgr.transpose(2,0,1))).float().unsqueeze(0).to(device)
 
-    _log(1,6,"Forward pass capturing hooks …")
+    _log(1,7,"Forward pass capturing hooks …")
     rrdb.eval()
     with torch.no_grad(): rrdb(img_t)
     for h in hooks: h.remove()
 
-    # get filter weights for classification
     w_first = rrdb.conv_first.weight.detach().cpu().numpy()  # (64,3,3,3)
 
-    _log(2,6,"Plotting 64 filter responses …")
+    _log(2,7,"Plotting 64 filter responses …")
     with matplotlib.rc_context(RC):
         _plot_filters(cf_feat["d"], w_first, input_np, out_dir/"01_filter_responses_64.png")
 
-    _log(3,6,"Plotting 23 RRDB block progression …")
+    _log(3,7,"Plotting 23 RRDB block progression …")
     with matplotlib.rc_context(RC):
         _plot_blocks(blk, out_dir/"02_block_progression_23.png")
 
-    _log(4,6,"Frequency domain analysis …")
+    _log(4,7,"Frequency domain analysis …")
     with matplotlib.rc_context(RC):
         _plot_freq_analysis(input_np, output_np, out_dir/"03_frequency_before_after.png")
 
-    _log(5,6,"New frequency generation map …")
+    _log(5,7,"New frequency generation map …")
     with matplotlib.rc_context(RC):
         _plot_new_freqs(input_np, output_np, out_dir/"04_new_frequencies_generated.png")
 
-    _log(6,6,"Radar summary …")
+    _log(6,7,"Radar summary …")
     with matplotlib.rc_context(RC):
         _plot_radar(input_np, output_np, out_dir/"05_radar_summary.png")
 
-    print(f"\n  ✓ All 5 visualizations → {out_dir}\n")
+    _log(7,7,"Tiling / grid diagram …")
+    with matplotlib.rc_context(RC):
+        _plot_tiling(input_np, output_np, tile_size, tile_pad,
+                     out_dir/"06_tiling_grid_diagram.png")
+
+    print(f"\n  ✓ All 6 visualizations → {out_dir}\n")
 
 
 # ── 1. FILTER RESPONSES ──────────────────────────────────────────────────────
@@ -448,5 +453,192 @@ def _plot_radar(in_np, out_np, save_path):
         f"Shows energy in 8 frequency bands before vs after enhancement.\n"
         f"Labels show % gain per band. Avg high-freq gain: {total_gain:+.1f}%",
         color=TEXT, fontsize=11, fontweight="bold", y=1.03)
+
+    fig.savefig(save_path, dpi=120, bbox_inches="tight"); plt.close(fig)
+
+
+# ── 6. TILING / GRID DIAGRAM ─────────────────────────────────────────────────
+
+def _plot_tiling(in_np, out_np, tile_size, tile_pad, save_path):
+    """
+    4-panel diagram explaining Real-ESRGAN tiling:
+      A) Input image with tile grid overlay + overlap padding
+      B) One example tile zoomed in (shows core + padding)
+      C) Output image with stitched tile grid overlay
+      D) Table of tiling parameters and stats
+    """
+    H, W = in_np.shape[:2]
+    sH, sW = out_np.shape[:2]
+
+    # compute tile grid
+    if tile_size <= 0 or tile_size >= min(H, W):
+        effective_tile = min(H, W)
+        n_rows, n_cols = 1, 1
+        mode_label = f"Full-image mode (tile=0 or tile≥image size)\nEntire {W}×{H} image processed as one tile — no stitching needed."
+    else:
+        effective_tile = tile_size
+        import math
+        n_rows = math.ceil(H / tile_size)
+        n_cols = math.ceil(W / tile_size)
+        mode_label = (f"Tiled mode (tile={tile_size}px, pad={tile_pad}px)\n"
+                      f"{n_cols}×{n_rows} = {n_cols*n_rows} tiles  |"
+                      f"  Each tile: {tile_size}×{tile_size}px core + {tile_pad}px overlap padding")
+
+    # tile colours (cycle)
+    COLOURS = [
+        "#6c8bff","#a259ff","#00e5ff","#39ff8a",
+        "#ffd166","#ff4d6a","#ff9f1c","#06d6a0",
+        "#ef476f","#118ab2","#ffd166","#aeffd8",
+    ]
+
+    fig = plt.figure(figsize=(22, 14))
+    fig.suptitle(
+        "Real-ESRGAN — Tiling & Grid Processing Diagram\n"
+        + mode_label,
+        color=TEXT, fontsize=10, fontweight="bold", y=0.98)
+
+    gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.35, wspace=0.25,
+                           left=0.05, right=0.97, top=0.89, bottom=0.05)
+
+    # ── Panel A: input image + tile grid ──────────────────────────────
+    ax_a = fig.add_subplot(gs[0, 0])
+    ax_a.imshow(in_np, interpolation="bilinear", aspect="auto")
+    _s(ax_a, title=f"A — Input Image with Tile Grid  ({W}×{H} px)\n"
+                   f"Coloured boxes = individual tiles sent to GPU.  "
+                   f"Overlap padding = {tile_pad}px (dashed margin)")
+    ax_a.set_xticks([]); ax_a.set_yticks([])
+
+    tile_idx = 0
+    for r in range(n_rows):
+        for c in range(n_cols):
+            x0 = c * effective_tile
+            y0 = r * effective_tile
+            tw = min(effective_tile, W - x0)
+            th = min(effective_tile, H - y0)
+            col = COLOURS[tile_idx % len(COLOURS)]
+            tile_idx += 1
+
+            # core tile rect
+            rect = mpatches.Rectangle((x0, y0), tw, th,
+                linewidth=1.5, edgecolor=col, facecolor=col, alpha=0.18)
+            ax_a.add_patch(rect)
+            rect2 = mpatches.Rectangle((x0, y0), tw, th,
+                linewidth=1.5, edgecolor=col, facecolor="none")
+            ax_a.add_patch(rect2)
+
+            # padding overlay (dashed)
+            px0 = max(0, x0 - tile_pad); py0 = max(0, y0 - tile_pad)
+            px1 = min(W, x0 + tw + tile_pad); py1 = min(H, y0 + th + tile_pad)
+            pad_rect = mpatches.Rectangle((px0, py0), px1-px0, py1-py0,
+                linewidth=0.8, edgecolor=col, facecolor="none",
+                linestyle="--", alpha=0.5)
+            ax_a.add_patch(pad_rect)
+
+            # tile number label
+            ax_a.text(x0 + tw/2, y0 + th/2,
+                      f"T{r*n_cols+c+1:02d}",
+                      ha="center", va="center",
+                      color=col, fontsize=max(5, 9-n_rows),
+                      fontweight="bold")
+
+    ax_a.set_xlim(0, W); ax_a.set_ylim(H, 0)
+
+    # ── Panel B: zoomed tile detail (first tile) ───────────────────────
+    ax_b = fig.add_subplot(gs[0, 1])
+    _s(ax_b, title="B — Zoomed: One Tile (T01) with Overlap Padding\n"
+                   "Solid border = core tile sent for upscale.  "
+                   "Dashed border = overlap padding (blends seams)")
+
+    # crop first tile + padding from the input
+    p = tile_pad
+    x0e = min(effective_tile, W)
+    y0e = min(effective_tile, H)
+    xp0 = max(0, 0 - p); xp1 = min(W, x0e + p)
+    yp0 = max(0, 0 - p); yp1 = min(H, y0e + p)
+    tile_crop = in_np[yp0:yp1, xp0:xp1]
+
+    ax_b.imshow(tile_crop, interpolation="nearest", aspect="auto")
+    ax_b.set_xticks([]); ax_b.set_yticks([])
+
+    # core boundary
+    core_x = 0 - xp0; core_y = 0 - yp0
+    core_w = x0e - 0; core_h = y0e - 0
+    ax_b.add_patch(mpatches.Rectangle(
+        (core_x, core_y), core_w, core_h,
+        linewidth=2.5, edgecolor=GREEN, facecolor="none", label="Core tile"))
+    # pad boundary
+    ax_b.add_patch(mpatches.Rectangle(
+        (0, 0), xp1-xp0-1, yp1-yp0-1,
+        linewidth=1.5, edgecolor=GOLD, facecolor="none",
+        linestyle="--", label=f"+ {p}px padding"))
+
+    ax_b.legend(facecolor=BG3, labelcolor=TEXT, fontsize=8, loc="lower right")
+    ax_b.text(core_x + core_w/2, core_y + core_h/2,
+              f"Core\n{x0e}×{y0e}px\n→GPU",
+              ha="center", va="center", color=GREEN, fontsize=9, fontweight="bold")
+    ax_b.text(2, 2, f"Padded region\n({xp1-xp0}×{yp1-yp0}px total)",
+              color=GOLD, fontsize=7)
+
+    # ── Panel C: output image + stitching grid ─────────────────────────
+    ax_c = fig.add_subplot(gs[1, 0])
+    ax_c.imshow(out_np, interpolation="bilinear", aspect="auto")
+    _s(ax_c, title=f"C — Output Image with Stitched Tile Grid  ({sW}×{sH} px, {sW//max(W,1)}× upscale)\n"
+                   "Tiles are upscaled independently then seamlessly stitched together")
+    ax_c.set_xticks([]); ax_c.set_yticks([])
+
+    scale_x = sW / max(W, 1); scale_y = sH / max(H, 1)
+    tile_idx = 0
+    for r in range(n_rows):
+        for c in range(n_cols):
+            x0 = int(c * effective_tile * scale_x)
+            y0 = int(r * effective_tile * scale_y)
+            tw = int(min(effective_tile, W - c*effective_tile) * scale_x)
+            th = int(min(effective_tile, H - r*effective_tile) * scale_y)
+            col = COLOURS[tile_idx % len(COLOURS)]
+            tile_idx += 1
+            rect = mpatches.Rectangle((x0,y0), tw, th,
+                linewidth=1.5, edgecolor=col, facecolor="none")
+            ax_c.add_patch(rect)
+            ax_c.text(x0+tw/2, y0+th/2, f"T{r*n_cols+c+1:02d}",
+                      ha="center", va="center",
+                      color=col, fontsize=max(5, 9-n_rows), fontweight="bold")
+    ax_c.set_xlim(0, sW); ax_c.set_ylim(sH, 0)
+
+    # ── Panel D: stats table ───────────────────────────────────────────
+    ax_d = fig.add_subplot(gs[1, 1])
+    ax_d.set_facecolor(BG2)
+    ax_d.set_xticks([]); ax_d.set_yticks([])
+    for sp in ax_d.spines.values(): sp.set_edgecolor(BG3)
+    ax_d.set_title("D — Tiling Parameters & Processing Stats",
+                   color=TEXT, fontsize=9, pad=6)
+
+    rows = [
+        ("Input size",         f"{W} × {H} px"),
+        ("Output size",        f"{sW} × {sH} px"),
+        ("Scale factor",       f"{sW // max(W,1)}×"),
+        ("Tile mode",          "Tiled" if tile_size>0 else "Full-image (tile=0)"),
+        ("Tile size (core)",   f"{effective_tile} × {effective_tile} px" if tile_size>0 else "N/A"),
+        ("Overlap padding",    f"{tile_pad} px" if tile_size>0 else "N/A"),
+        ("Grid layout",        f"{n_cols} cols × {n_rows} rows"),
+        ("Total tiles",        f"{n_cols * n_rows}"),
+        ("Pixels per tile",    f"{effective_tile**2:,}" if tile_size>0 else f"{W*H:,}"),
+        ("Padded tile size",   f"{effective_tile+2*tile_pad} × {effective_tile+2*tile_pad} px" if tile_size>0 else "N/A"),
+        ("VRAM saving vs full",f"~{100*(1 - (effective_tile+2*tile_pad)**2 / max(W*H,1)):.0f}%" if tile_size>0 else "0% (full image)"),
+    ]
+
+    y = 0.95
+    for label, val in rows:
+        ax_d.text(0.04, y, label, transform=ax_d.transAxes,
+                  color=TEXT2, fontsize=9, va="top")
+        ax_d.text(0.55, y, val, transform=ax_d.transAxes,
+                  color=GOLD if label in ("Total tiles","VRAM saving vs full") else TEXT,
+                  fontsize=9, va="top", fontweight="bold")
+        y -= 0.085
+
+    ax_d.text(0.5, 0.03,
+        "Tiling prevents GPU OOM errors on large images.\n"
+        "Overlap padding eliminates seam artefacts at tile edges.",
+        transform=ax_d.transAxes, ha="center", color=CYAN, fontsize=8,
+        style="italic", va="bottom")
 
     fig.savefig(save_path, dpi=120, bbox_inches="tight"); plt.close(fig)
