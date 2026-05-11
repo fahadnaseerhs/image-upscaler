@@ -1,6 +1,6 @@
-<![CDATA[<div align="center">
+<div align="center">
 
-# 🚀 Image Enhancement Pipeline — DSP Project
+# Image Enhancement Pipeline — DSP Project
 
 ### A Full-Stack Image Enhancement System | Classical DSP + AI Super-Resolution
 
@@ -14,18 +14,14 @@
 
 ---
 
-<div align="center">
-
-## ⚡ QUICK START — CLONE & RUN IN ONE COMMAND ⚡
-
-</div>
+## QUICK START — CLONE & RUN IN ONE COMMAND
 
 > [!IMPORTANT]
 > **Prerequisites:** You only need **Python 3.10+** installed and added to your PATH. Everything else is automated.
 
 ---
 
-### 📥 Step 1 — Clone the Repository
+### Step 1 — Clone the Repository
 
 Open a terminal (Command Prompt / PowerShell / Git Bash) and run:
 
@@ -43,59 +39,46 @@ git clone https://github.com/fahadnaseerhs/image-upscaler.git "%USERPROFILE%\Des
 
 ---
 
-### 🖥️ Step 2 — Run the Project
+### Step 2 — Run the Project
 
 Navigate into the project and launch:
 
-<table>
-<tr>
-<th>🪟 Windows</th>
-<th>🐧 Linux / 🍎 macOS</th>
-</tr>
-<tr>
-<td>
-
+**Windows**
 ```bat
 cd %USERPROFILE%\Desktop\DSP_Project
 run.bat
 ```
 
-</td>
-<td>
-
+**Linux / macOS**
 ```bash
 cd ~/Desktop/DSP_Project
 chmod +x run.sh
 ./run.sh
 ```
 
-</td>
-</tr>
-</table>
-
 > [!NOTE]
 > **What happens automatically when you run `run.bat` / `run.sh`:**
-> 1. ✅ Creates a Python virtual environment (`venv/`)
-> 2. ✅ Installs all dependencies from `requirements.txt`
-> 3. ✅ Activates the environment
-> 4. ✅ Launches the Flask web server on `http://localhost:5000`
+> 1. Creates a Python virtual environment (`venv/`)
+> 2. Installs all dependencies from `requirements.txt`
+> 3. Activates the environment
+> 4. Launches the Flask web server on `http://localhost:5000`
 >
-> **You don't need to install anything manually. Just clone → run.**
+> **You do not need to install anything manually. Just clone and run.**
 
 ---
 
 > [!CAUTION]
-> **Windows users** → Use **`run.bat`** (double-click or run from CMD/PowerShell)
+> **Windows users** -> Use **`run.bat`** (double-click or run from CMD/PowerShell)
 >
-> **Linux / macOS users** → Use **`run.sh`** (run from terminal with `./run.sh`)
+> **Linux / macOS users** -> Use **`run.sh`** (run from terminal with `./run.sh`)
 >
-> ❌ Do **NOT** use `run.sh` on Windows or `run.bat` on Linux/macOS.
+> Do **NOT** use `run.sh` on Windows or `run.bat` on Linux/macOS.
 
 ---
 
-## 🔧 Manual Setup (Optional — Only If You Prefer)
+## Manual Setup (Optional)
 
-If you don't want to use the one-click scripts, you can set up manually:
+If you prefer not to use the automated scripts, you can set up the environment manually:
 
 ```bash
 # 1. Clone
@@ -121,9 +104,9 @@ python app.py
 
 ---
 
-## What It Does
+## Overview
 
-Takes a low-resolution or degraded image and reconstructs a high-resolution version using one of three methods:
+This project takes a low-resolution or degraded image and reconstructs a high-resolution version using one of three methods:
 
 | Method | Type | Quality | Speed |
 |---|---|---|---|
@@ -131,20 +114,20 @@ Takes a low-resolution or degraded image and reconstructs a high-resolution vers
 | **Lanczos** | Classical DSP — windowed sinc kernel | Better | Fast (CPU) |
 | **Real-ESRGAN** | AI super-resolution — RRDBNet | Best | Slow (needs GPU) |
 
-Scale factors: **2×, 4×, 8×**
+Supported scale factors: **2x, 4x, 8x**
 
 ---
 
 ## Project Structure
 
-```
+```text
 DSP_Project/
 ├── app.py                  # Flask web server with SSE live streaming
 ├── main.py                 # CLI entry point and pipeline orchestrator
-├── run.bat                 # 🪟 One-click launcher (Windows)
-├── run.sh                  # 🐧 One-click launcher (Linux/macOS)
-├── setup.bat               # 🪟 Environment setup (Windows)
-├── setup.sh                # 🐧 Environment setup (Linux/macOS)
+├── run.bat                 # One-click launcher (Windows)
+├── run.sh                  # One-click launcher (Linux/macOS)
+├── setup.bat               # Environment setup (Windows)
+├── setup.sh                # Environment setup (Linux/macOS)
 ├── requirements.txt        # Python dependencies
 ├── loader.py               # Image loading, validation, channel splitting, normalization
 ├── grid.py                 # Sparse grid creation — upsampling step (DSP)
@@ -180,25 +163,25 @@ DSP_Project/
 
 The pipeline processes images through 5 stages:
 
-```
+```text
 Input Image
-    │
-    ▼
+    |
+    v
 [1] LOAD — Read file, validate, split into R/G/B channels, normalize to [0.0, 1.0]
-    │
-    ▼
+    |
+    v
 [2] GRID — Create sparse grid (H×scale, W×scale), place known pixels at scale-spaced
-           positions, fill rest with NaN  ← DSP upsampling by factor L
-    │
-    ▼
+           positions, fill rest with NaN  <- DSP upsampling by factor L
+    |
+    v
 [3] INTERPOLATE — Fill every NaN using weighted kernel sums of neighboring pixels
                   Bicubic: Keys' piecewise cubic, 4×4 neighborhood
                   Lanczos: windowed sinc, 6×6 neighborhood (a=3)
-    │
-    ▼
-[4] SAVE — Denormalize [0,1] → [0,255], merge channels, optional UnsharpMask, write PNG
-    │
-    ▼
+    |
+    v
+[4] SAVE — Denormalize [0,1] -> [0,255], merge channels, optional UnsharpMask, write PNG
+    |
+    v
 [5] COMPLETE
 ```
 
@@ -214,7 +197,7 @@ Open `http://localhost:5000`
 
 **Features:**
 - Drag-and-drop image upload
-- Scale factor: 2×, 4×, 8×
+- Scale factor: 2x, 4x, 8x
 - Method: Bicubic, Lanczos, AI (Real-ESRGAN)
 - Execution backend: Local CPU/GPU, Hugging Face Space, Google Colab GPU
 - Real-time 3D visualization (Three.js) showing the pipeline stages
@@ -223,16 +206,16 @@ Open `http://localhost:5000`
 
 ---
 
-## CLI
+## Command Line Interface (CLI)
 
 ```bash
-# Basic 2× Lanczos upscale
+# Basic 2x Lanczos upscale
 python main.py --input photo.jpg
 
-# Bicubic 4× upscale
+# Bicubic 4x upscale
 python main.py --input photo.jpg --method bicubic --scale 4
 
-# Lanczos 8× with sharpening
+# Lanczos 8x with sharpening
 python main.py --input photo.jpg --scale 8 --sharpen
 
 # Compare Bicubic vs Lanczos side-by-side
@@ -290,7 +273,7 @@ Use Colab's free T4 GPU for Real-ESRGAN when you don't have a local GPU.
 
 **1. Open Colab and set GPU runtime**
 
-Go to [colab.google.com](https://colab.google.com) → open `colab_worker.ipynb` → `Runtime → Change runtime type → T4 GPU`
+Go to [colab.google.com](https://colab.google.com) -> open `colab_worker.ipynb` -> `Runtime -> Change runtime type -> T4 GPU`
 
 **2. Upload `graphs/` folder to Google Drive**
 
@@ -319,11 +302,11 @@ print('Done')
 | Endpoint | Description |
 |---|---|
 | `/enhance` | Standard enhancement — returns upscaled image |
-| `/analyze` | Enhancement + all 6 visualization plots on GPU → returns zip file |
+| `/analyze` | Enhancement + all 6 visualization plots on GPU -> returns zip file |
 
-### Using `/analyze` (browser)
+### Using `/analyze` (Browser)
 
-Open the `gradio.live` URL → **Analyze tab** → upload image → set scale/tile → **Run Full Analysis on GPU** → download zip from Colab Files panel (`/content/results/`)
+Open the `gradio.live` URL -> **Analyze tab** -> upload image -> set scale/tile -> **Run Full Analysis on GPU** -> download zip from Colab Files panel (`/content/results/`)
 
 ### Using `/enhance` (CLI)
 
@@ -341,7 +324,7 @@ Running `--analyze-esrgan` generates 6 diagnostic plots saved to `output/realesr
 | File | Description |
 |---|---|
 | `00_enhanced_output.png` | The upscaled image |
-| `01_filter_responses_64.png` | All 64 first-layer kernel weights (3×3 patches, RdBu colormap) |
+| `01_filter_responses_64.png` | All 64 first-layer kernel weights (3x3 patches, RdBu colormap) |
 | `01_filter_responses_top16.png` | Top 16 most active feature maps by variance |
 | `02_block_progression_23.png` | 23 RRDB block activations + energy/variance chart (twin y-axis) |
 | `03_frequency_before_after.png` | 2D FFT: input vs output vs difference spectrum |
@@ -356,12 +339,12 @@ Running `--analyze-esrgan` generates 6 diagnostic plots saved to `output/realesr
 | Concept | Where |
 |---|---|
 | Discrete 2D signal | Image as pixel array |
-| Signal normalization | `loader.py` — uint8 → float64 |
+| Signal normalization | `loader.py` — uint8 -> float64 |
 | Upsampling by factor L | `grid.py` — sparse grid with NaN placeholders |
 | Reconstruction filter | `interpolation.py` — both algorithms |
 | Piecewise cubic filter (Keys') | Bicubic interpolation via SciPy `map_coordinates` |
 | Ideal sinc / windowed sinc | Lanczos interpolation via PIL `Image.LANCZOS` |
-| Filter separability | 2D weight = w_row × w_col |
+| Filter separability | 2D weight = w_row x w_col |
 | Ringing artifact | Lanczos negative side-lobes, clipped in `saver.py` |
 | High-frequency emphasis | UnsharpMask post-processing |
 | Learned non-linear filter | Real-ESRGAN (23-stage RRDBNet) |
@@ -371,7 +354,7 @@ Running `--analyze-esrgan` generates 6 diagnostic plots saved to `output/realesr
 
 ## Output Files
 
-```
+```text
 output/
 ├── <name>_lanczos_4x.png           # Classical upscale result
 ├── <name>_bicubic_4x.png           # Classical upscale result
@@ -401,4 +384,3 @@ output/
 ## License
 
 Open source — available for educational and personal use.
-]]>
