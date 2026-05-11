@@ -25,7 +25,8 @@ output/*
 .idea/
 
 # Model weights (too large for git)
-models/
+models/*
+!models/.gitkeep
 hf_space/models/
 gfpgan/weights/
 *.pth

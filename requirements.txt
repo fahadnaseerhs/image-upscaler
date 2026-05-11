@@ -1,0 +1,15 @@
+flask
+numpy
+matplotlib
+torch
+torchvision
+torchaudio
+realesrgan
+scipy
+pillow
+gradio
+basicsr
+fpdf2
+seaborn
+opencv-python
+psutil

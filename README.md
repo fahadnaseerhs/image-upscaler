@@ -1,12 +1,123 @@
-# Image Enhancer
+<![CDATA[<div align="center">
 
-A full-stack image enhancement pipeline combining classical Digital Signal Processing (DSP) interpolation algorithms with AI super-resolution (Real-ESRGAN). Features a Flask web UI with real-time 3D visualization, a CLI, and a Google Colab GPU worker for remote processing and on-GPU visualization.
+# 🚀 Image Enhancement Pipeline — DSP Project
+
+### A Full-Stack Image Enhancement System | Classical DSP + AI Super-Resolution
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-Web_UI-000000?logo=flask)
 ![Three.js](https://img.shields.io/badge/Three.js-3D_Viz-black?logo=three.js)
 ![Real-ESRGAN](https://img.shields.io/badge/Real--ESRGAN-AI_SR-ff6b35)
 ![Colab](https://img.shields.io/badge/Google_Colab-GPU_Worker-F9AB00?logo=googlecolab)
+
+</div>
+
+---
+
+<div align="center">
+
+## ⚡ QUICK START — CLONE & RUN IN ONE COMMAND ⚡
+
+</div>
+
+> [!IMPORTANT]
+> **Prerequisites:** You only need **Python 3.10+** installed and added to your PATH. Everything else is automated.
+
+---
+
+### 📥 Step 1 — Clone the Repository
+
+Open a terminal (Command Prompt / PowerShell / Git Bash) and run:
+
+```bash
+git clone https://github.com/fahadnaseerhs/image-upscaler.git "%USERPROFILE%\Desktop\DSP_Project"
+```
+
+> [!TIP]
+> This clones the project into a folder named **`DSP_Project`** on your **Desktop**.
+>
+> **Linux / macOS users:**
+> ```bash
+> git clone https://github.com/fahadnaseerhs/image-upscaler.git ~/Desktop/DSP_Project
+> ```
+
+---
+
+### 🖥️ Step 2 — Run the Project
+
+Navigate into the project and launch:
+
+<table>
+<tr>
+<th>🪟 Windows</th>
+<th>🐧 Linux / 🍎 macOS</th>
+</tr>
+<tr>
+<td>
+
+```bat
+cd %USERPROFILE%\Desktop\DSP_Project
+run.bat
+```
+
+</td>
+<td>
+
+```bash
+cd ~/Desktop/DSP_Project
+chmod +x run.sh
+./run.sh
+```
+
+</td>
+</tr>
+</table>
+
+> [!NOTE]
+> **What happens automatically when you run `run.bat` / `run.sh`:**
+> 1. ✅ Creates a Python virtual environment (`venv/`)
+> 2. ✅ Installs all dependencies from `requirements.txt`
+> 3. ✅ Activates the environment
+> 4. ✅ Launches the Flask web server on `http://localhost:5000`
+>
+> **You don't need to install anything manually. Just clone → run.**
+
+---
+
+> [!CAUTION]
+> **Windows users** → Use **`run.bat`** (double-click or run from CMD/PowerShell)
+>
+> **Linux / macOS users** → Use **`run.sh`** (run from terminal with `./run.sh`)
+>
+> ❌ Do **NOT** use `run.sh` on Windows or `run.bat` on Linux/macOS.
+
+---
+
+## 🔧 Manual Setup (Optional — Only If You Prefer)
+
+If you don't want to use the one-click scripts, you can set up manually:
+
+```bash
+# 1. Clone
+git clone https://github.com/fahadnaseerhs/image-upscaler.git "%USERPROFILE%\Desktop\DSP_Project"
+cd "%USERPROFILE%\Desktop\DSP_Project"
+
+# 2. Create virtual environment
+python -m venv venv
+
+# 3. Activate it
+# Windows:
+venv\Scripts\activate
+# Linux/macOS:
+# source venv/bin/activate
+
+# 4. Install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# 5. Run
+python app.py
+```
 
 ---
 
@@ -27,9 +138,14 @@ Scale factors: **2×, 4×, 8×**
 ## Project Structure
 
 ```
-image-enhancer/
+DSP_Project/
 ├── app.py                  # Flask web server with SSE live streaming
 ├── main.py                 # CLI entry point and pipeline orchestrator
+├── run.bat                 # 🪟 One-click launcher (Windows)
+├── run.sh                  # 🐧 One-click launcher (Linux/macOS)
+├── setup.bat               # 🪟 Environment setup (Windows)
+├── setup.sh                # 🐧 Environment setup (Linux/macOS)
+├── requirements.txt        # Python dependencies
 ├── loader.py               # Image loading, validation, channel splitting, normalization
 ├── grid.py                 # Sparse grid creation — upsampling step (DSP)
 ├── interpolation.py        # Bicubic & Lanczos interpolation engines
@@ -38,6 +154,7 @@ image-enhancer/
 ├── enhancer_remote.py      # Remote Real-ESRGAN via Colab or HF Space
 ├── colab_worker.py         # Colab GPU worker script — /enhance + /analyze endpoints
 ├── colab_worker.ipynb      # Colab notebook launcher
+├── generate_dsp_pdf.py     # DSP Concepts PDF report generator
 ├── graphs/
 │   ├── realesrgan_viz.py   # Real-ESRGAN visualization suite (6 plots)
 │   ├── spatial_domain.py   # Spatial domain before/after + diff + zoom
@@ -83,32 +200,6 @@ Input Image
     │
     ▼
 [5] COMPLETE
-```
-
----
-
-## Installation
-
-### Core (classical methods only)
-
-```bash
-pip install flask numpy pillow scipy matplotlib
-```
-
-### With AI Enhancement (Real-ESRGAN)
-
-```bash
-pip install flask numpy pillow scipy matplotlib
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip install basicsr realesrgan opencv-python
-```
-
-### Optional
-
-```bash
-pip install gfpgan          # face restoration
-pip install gradio-client   # remote Colab/HF backend
-pip install psutil          # live CPU/RAM monitoring
 ```
 
 ---
@@ -310,3 +401,4 @@ output/
 ## License
 
 Open source — available for educational and personal use.
+]]>
