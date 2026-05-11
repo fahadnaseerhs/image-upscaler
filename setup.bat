@@ -45,4 +45,3 @@ echo OR manually activate the environment and run app.py:
 echo   1. venv\Scripts\activate
 echo   2. python app.py
 echo.
-pause
