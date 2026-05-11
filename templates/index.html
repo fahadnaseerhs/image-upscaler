@@ -1326,6 +1326,7 @@
       const faceGroup = document.getElementById('realesrgan-face-group');
       const advGroup = document.getElementById('realesrgan-adv-group');
       const faceToggle = document.getElementById('face-enhance-toggle');
+      const colabGroup = document.getElementById('colab-url-group');
 
       if (method === 'realesrgan') {
         lanczosGroup.style.opacity = '0.35';
@@ -1337,6 +1338,7 @@
         if (tileGroup) tileGroup.style.display = 'block';
         if (faceGroup) faceGroup.style.display = 'block';
         if (advGroup) advGroup.style.display = 'block';
+        if (colabGroup) colabGroup.style.display = 'block';
       } else {
         lanczosGroup.style.opacity = method === 'bicubic' ? '0.35' : '1';
         compareToggle.disabled = false;
@@ -1346,17 +1348,8 @@
         if (faceGroup) faceGroup.style.display = 'none';
         if (advGroup) advGroup.style.display = 'none';
         if (faceToggle) faceToggle.checked = false;
-        const colabGroup = document.getElementById('colab-url-group');
         if (colabGroup) colabGroup.style.display = 'none';
       }
-    }
-
-    // ── Colab URL group: show when realesrgan is selected ─────────────────
-    const _origUpdateMethod = updateMethodControls;
-    function updateMethodControls(method) {
-      _origUpdateMethod(method);
-      const colabGroup = document.getElementById('colab-url-group');
-      if (colabGroup) colabGroup.style.display = method === 'realesrgan' ? 'block' : 'none';
     }
 
     // ── Colab URL Set button ───────────────────────────────────────────────
