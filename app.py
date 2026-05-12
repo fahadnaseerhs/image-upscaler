@@ -44,10 +44,14 @@ ENHANCER_BACKEND = os.environ.get("ENHANCER_BACKEND", "remote").lower()
 
 app = Flask(__name__)
 
-OUTPUT_DIR = Path(__file__).parent / "output"
+# On Vercel, the deployment filesystem (/var/task/) is read-only.
+# Only /tmp/ is writable in Lambda. Detect via the VERCEL env var.
+_IS_VERCEL = bool(os.environ.get("VERCEL"))
+
+OUTPUT_DIR = Path("/tmp/output") if _IS_VERCEL else Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-UPLOAD_DIR = Path(__file__).parent / "uploads"
+UPLOAD_DIR = Path("/tmp/uploads") if _IS_VERCEL else Path(__file__).parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
