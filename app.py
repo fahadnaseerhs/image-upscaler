@@ -32,12 +32,15 @@ import loader
 import grid as grid_module
 import interpolation
 import saver
-import enhancer
+try:
+    import enhancer
+except ImportError:
+    enhancer = None  # torch/realesrgan not available (e.g. Vercel deployment)
 import enhancer_remote
 
 # Backend for AI enhancement: "remote" (HF Space) or "local" (Vercel GPU).
-# Set via environment variable ENHANCER_BACKEND. Default is "local".
-ENHANCER_BACKEND = os.environ.get("ENHANCER_BACKEND", "local").lower()
+# Set via environment variable ENHANCER_BACKEND. Default is "remote".
+ENHANCER_BACKEND = os.environ.get("ENHANCER_BACKEND", "remote").lower()
 
 app = Flask(__name__)
 
@@ -212,6 +215,12 @@ def _run_pipeline(
             })
         elif method == "realesrgan" and not compare:
             # ── Stage 3: AI enhancement (Local) ────────────────────────────
+            if enhancer is None:
+                raise RuntimeError(
+                    "Local AI enhancement is not available on this server "
+                    "(torch/realesrgan not installed). Please switch to the "
+                    "Hugging Face backend for AI upscaling."
+                )
             emit("stage", {"stage": 3, "label": "AI enhancement"})
             t0 = time.time()
             backend_label = "local"

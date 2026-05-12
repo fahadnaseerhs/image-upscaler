@@ -16,6 +16,6 @@
     }
   ],
   "env": {
-    "ENHANCER_BACKEND": "local"
+    "ENHANCER_BACKEND": "remote"
   }
 }

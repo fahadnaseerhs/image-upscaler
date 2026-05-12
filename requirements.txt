@@ -2,13 +2,5 @@ flask
 numpy
 scipy
 pillow
-opencv-python-headless
-torch
-torchvision
-torchaudio
-realesrgan
-basicsr
-gradio
 matplotlib
-seaborn
-fpdf2
+gradio-client
