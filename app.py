@@ -35,15 +35,9 @@ import saver
 import enhancer
 import enhancer_remote
 
-# Backend for AI enhancement: "remote" (Colab/HF Space) or "local" (on-device).
-# Set via environment variable ENHANCER_BACKEND. Default is "remote".
-ENHANCER_BACKEND = os.environ.get("ENHANCER_BACKEND", "remote").lower()
-
-# Optional: override the remote URL at startup via env var.
-# The Colab worker URL (https://xxxx.gradio.live) can also be set here
-# so the app uses it without needing to restart.
-# Example:  set COLAB_WORKER_URL=https://xxxx.gradio.live
-_COLAB_WORKER_URL: str = os.environ.get("COLAB_WORKER_URL", "").strip()
+# Backend for AI enhancement: "remote" (HF Space) or "local" (Vercel GPU).
+# Set via environment variable ENHANCER_BACKEND. Default is "local".
+ENHANCER_BACKEND = os.environ.get("ENHANCER_BACKEND", "local").lower()
 
 app = Flask(__name__)
 
@@ -369,27 +363,9 @@ def get_grid_data():
         return jsonify(_latest_grid_data)
 
 
-@app.route("/api/cpu")
-def get_cpu():
-    """Return live CPU and memory usage for the UI polling."""
-    info: dict = {"cpu": 0.0, "mem": 0.0, "backend": ENHANCER_BACKEND}
-    try:
-        import psutil
-        info["cpu"] = psutil.cpu_percent(interval=None)
-        vm = psutil.virtual_memory()
-        info["mem"] = round(vm.percent, 1)
-        info["mem_used_gb"] = round(vm.used / (1024 ** 3), 2)
-        info["mem_total_gb"] = round(vm.total / (1024 ** 3), 2)
-    except ImportError:
-        # psutil not installed — best-effort fallback
-        info["cpu"] = 0.0
-        info["mem"] = 0.0
-    return jsonify(info)
-
-
 @app.route("/api/hardware")
 def get_hardware():
-    """Return lightweight CPU/GPU info for the UI."""
+    """Return lightweight GPU/device info for the UI."""
     info: dict = {"has_torch": False, "device": "unknown", "cuda": False}
     try:
         import torch  # type: ignore
@@ -414,29 +390,11 @@ def get_hardware():
     # Enhancement backend info
     info["enhancer_backend"] = ENHANCER_BACKEND
     remote_status = enhancer_remote.get_remote_status()
-    info["remote_backend"]  = remote_status["backend"]
-    info["remote_label"]    = remote_status["label"]
-    info["remote_url"]      = remote_status["url"] or "(not configured)"
+    info["remote_backend"] = remote_status["backend"]
+    info["remote_label"]   = remote_status["label"]
+    info["remote_url"]     = remote_status["url"] or "(not configured)"
 
     return jsonify(info)
-
-
-@app.route("/api/set-colab-url", methods=["POST"])
-def set_colab_url():
-    """
-    Allow the UI to set the Colab worker URL at runtime without restarting.
-    POST JSON: { "url": "https://xxxx.gradio.live" }
-    """
-    data = request.get_json(silent=True) or {}
-    url  = str(data.get("url", "")).strip()
-    if not url:
-        return jsonify({"error": "url is required"}), 400
-
-    # Inject into the enhancer_remote module so all future calls use it
-    enhancer_remote.COLAB_WORKER_URL = url
-    os.environ["COLAB_WORKER_URL"]   = url
-    print(f"[app] Colab worker URL updated: {url}")
-    return jsonify({"ok": True, "url": url, "label": "Colab GPU Worker"})
 
 
 @app.route("/api/process", methods=["POST"])
